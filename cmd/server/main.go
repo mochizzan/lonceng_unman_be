@@ -5,6 +5,7 @@ import (
 
 	"lonceng_unman_be/internal/application/service"
 	"lonceng_unman_be/internal/config"
+	"lonceng_unman_be/internal/infrastructure/fibererror"
 	"lonceng_unman_be/internal/infrastructure/logger"
 	"lonceng_unman_be/internal/infrastructure/middleware"
 	"lonceng_unman_be/internal/interfaces/http/handler"
@@ -24,9 +25,10 @@ func main() {
 	log := logger.New(cfg.App.Env)
 	slog.SetDefault(log)
 
-	// Create Fiber app
+	// Create Fiber app with custom error handler
 	app := fiber.New(fiber.Config{
-		AppName: cfg.App.Name,
+		AppName:      cfg.App.Name,
+		ErrorHandler: fibererror.New(),
 	})
 
 	// Register middleware (recover → requestid → logger → cors)

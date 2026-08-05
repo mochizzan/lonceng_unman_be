@@ -9,14 +9,19 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
 
 // Register attaches the standard middleware stack to the Fiber app.
+// Order matters: recover must be first, then requestid, then logger.
 func Register(app *fiber.App, corsCfg config.CORSConfig) {
-	// Recover from panics
+	// Recover from panics (must be first)
 	app.Use(recover.New())
 
-	// Request logger
+	// Assign a unique request ID to every request
+	app.Use(requestid.New())
+
+	// Request logger (runs after requestid is set, so logs include the ID)
 	app.Use(logger.New())
 
 	// CORS
