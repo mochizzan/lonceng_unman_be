@@ -7,9 +7,12 @@ import (
 )
 
 // Setup registers all application routes on the Fiber app.
-func Setup(app *fiber.App, healthHandler *handler.HealthHandler) {
+func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *handler.LMSHandler) {
 	v1 := app.Group("/api/v1")
 
 	// Health
 	v1.Get("/health", healthHandler.Check)
+
+	// LMS
+	v1.Post("/lms/login", lmsHandler.Login)
 }

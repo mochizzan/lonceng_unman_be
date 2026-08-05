@@ -36,12 +36,14 @@ func main() {
 
 	// Wire application services
 	healthService := service.NewHealthService(cfg.App)
+	lmsService := service.NewLMSService(cfg)
 
 	// Wire HTTP handlers
 	healthHandler := handler.NewHealthHandler(healthService)
+	lmsHandler := handler.NewLMSHandler(lmsService)
 
 	// Register routes
-	router.Setup(app, healthHandler)
+	router.Setup(app, healthHandler, lmsHandler)
 
 	// Start server
 	log.Info(
