@@ -22,4 +22,16 @@ const (
 	// Post-login data extraction
 	SelUserNPM  = ".user-panel .info p" // NPM in sidebar
 	SelUserName = ".user-header p"      // full name in user dropdown
+
+	// KHS list page (main.php?op=mahasiswa_khs&act=cetak)
+	SelKHSTable       = ".table-bordered"
+	SelKHSSemesterRow = ".table-bordered tbody tr td:nth-child(6)" // SKS column contains semester text
+	SelKHSDetailBtn   = "a[href*='act=cetak_detail']"
+
+	// KHS detail page (main.php?op=mahasiswa_khs&act=cetak_detail)
+	SelKHSCetakBtn = "a[href*='khs_pdf.php']"
+
+	// KRS direct download URL pattern
+	KRSDownloadPath = "/admin/cetak/krs_pdf.php"
+	KHSDownloadPath = "/admin/cetak/khs_pdf.php"
 )
