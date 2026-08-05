@@ -1,10 +1,11 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 
 	"lonceng_unman_be/internal/application/service"
 	"lonceng_unman_be/internal/config"
+	"lonceng_unman_be/internal/infrastructure/logger"
 	"lonceng_unman_be/internal/infrastructure/middleware"
 	"lonceng_unman_be/internal/interfaces/http/handler"
 	"lonceng_unman_be/internal/interfaces/http/router"
@@ -16,15 +17,19 @@ func main() {
 	// Load configuration
 	cfg, err := config.New()
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		panic("failed to load config: " + err.Error())
 	}
+
+	// Initialize structured logger and set as global default
+	log := logger.New(cfg.App.Env)
+	slog.SetDefault(log)
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
 		AppName: cfg.App.Name,
 	})
 
-	// Register middleware
+	// Register middleware (recover → requestid → logger → cors)
 	middleware.Register(app, cfg.CORS)
 
 	// Wire application services
@@ -37,8 +42,13 @@ func main() {
 	router.Setup(app, healthHandler)
 
 	// Start server
-	log.Printf("Starting %s on %s [%s]", cfg.App.Name, cfg.Addr(), cfg.App.Env)
+	log.Info(
+		"starting server",
+		"app", cfg.App.Name,
+		"addr", cfg.Addr(),
+		"env", cfg.App.Env,
+	)
 	if err := app.Listen(cfg.Addr()); err != nil {
-		log.Fatalf("server error: %v", err)
+		log.Error("server error", "err", err)
 	}
 }
