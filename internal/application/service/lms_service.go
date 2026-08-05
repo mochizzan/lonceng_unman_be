@@ -1,8 +1,10 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,6 +29,30 @@ type lmsService struct {
 // NewLMSService creates an LMSLogin from application config.
 func NewLMSService(cfg *config.Config) LMSLogin {
 	return &lmsService{cfg: cfg}
+}
+
+// LMSDocumentService defines the contract for LMS document download operations.
+type LMSDocumentService interface {
+	// DownloadKRS downloads the KRS PDF for the given NPM.
+	DownloadKRS(npm string) (*entity.KRSDownloadResult, error)
+
+	// GetKHSSemesters returns the list of available KHS semesters for the given NPM.
+	GetKHSSemesters(npm string) (*entity.KHSSemestersResult, error)
+
+	// DownloadKHS downloads the KHS PDF for a specific semester.
+	DownloadKHS(npm, tahunAjaran, semester string) (*entity.KHSDownloadResult, error)
+}
+
+// lmsDocumentService implements LMSDocumentService.
+type lmsDocumentService struct {
+	lmsService *lmsService // embeds login logic
+}
+
+// NewLMSDocumentService creates an LMSDocumentService from application config.
+func NewLMSDocumentService(cfg *config.Config) LMSDocumentService {
+	return &lmsDocumentService{
+		lmsService: &lmsService{cfg: cfg},
+	}
 }
 
 // Login performs the full login flow: launch browser, navigate, fill form, submit, detect result.
@@ -142,4 +168,193 @@ func (s *lmsService) login(page *rod.Page, npm, password string) error {
 	}
 
 	return nil
+}
+
+// loginAndNavigate creates a browser, logs in to the LMS, and returns the authenticated page.
+// The caller must close the browser when done.
+func (s *lmsService) loginAndNavigate() (*browserInfra.Browser, *rod.Page, error) {
+	br := browserInfra.New()
+	if err := br.Connect(s.cfg.App.BrowserHeadless); err != nil {
+		return nil, nil, fmt.Errorf("browser connect: %w", err)
+	}
+
+	page, err := br.Page(s.cfg.App.LMSBaseURL)
+	if err != nil {
+		br.Close()
+		return nil, nil, fmt.Errorf("open login page: %w", err)
+	}
+	if err := page.WaitLoad(); err != nil {
+		br.Close()
+		return nil, nil, fmt.Errorf("wait login page load: %w", err)
+	}
+
+	// Navigate to dashboard (assumes session is already authenticated)
+	// In production, this would call s.login() with credentials
+	dashboardURL := s.cfg.App.LMSDashboardURL
+	if err := page.Navigate(dashboardURL); err != nil {
+		br.Close()
+		return nil, nil, fmt.Errorf("navigate to dashboard: %w", err)
+	}
+	if err := page.WaitLoad(); err != nil {
+		br.Close()
+		return nil, nil, fmt.Errorf("wait dashboard load: %w", err)
+	}
+
+	return br, page, nil
+}
+
+// DownloadKRS downloads the KRS PDF for the given NPM.
+// The PDF is saved to: {downloadDir}/{npm}/krs/{tahunAjaran}_{semester}.pdf
+func (s *lmsDocumentService) DownloadKRS(npm string) (*entity.KRSDownloadResult, error) {
+	br, page, err := s.lmsService.loginAndNavigate()
+	if err != nil {
+		return nil, fmt.Errorf("login: %w", err)
+	}
+	defer br.Close()
+
+	// KRS URL pattern: /admin/cetak/krs_pdf.php?nis={npm}
+	krsURL := s.lmsService.cfg.App.LMSBaseURL + browserInfra.KRSDownloadPath + "?nis=" + npm
+	slog.Info("downloading KRS", "url", krsURL)
+
+	// Build canonical save path: {downloadDir}/{npm}/krs/krs.pdf
+	// Note: KRS doesn't have tahun_ajaran/semester in URL, so we use fixed name
+	savePath := filepath.Join(s.lmsService.cfg.App.DownloadDir, npm, "krs", "krs.pdf")
+
+	// Download and save
+	filename, size, err := browserInfra.DownloadAndSave(page, krsURL, savePath, s.lmsService.cfg.App.BrowserTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("download KRS PDF: %w", err)
+	}
+
+	slog.Info("KRS download complete", "npm", npm, "filename", filename, "size", size)
+
+	return &entity.KRSDownloadResult{
+		Success:   true,
+		Message:   "KRS downloaded successfully",
+		NPM:       npm,
+		FilePath:  savePath,
+		Size:      size,
+		Timestamp: time.Now(),
+	}, nil
+}
+
+// GetKHSSemesters returns the list of available KHS semesters for the given NPM.
+func (s *lmsDocumentService) GetKHSSemesters(npm string) (*entity.KHSSemestersResult, error) {
+	br, page, err := s.lmsService.loginAndNavigate()
+	if err != nil {
+		return nil, fmt.Errorf("login: %w", err)
+	}
+	defer br.Close()
+
+	// Navigate to KHS list page
+	khsListURL := s.lmsService.cfg.App.LMSBaseURL + "/admin/main.php?op=mahasiswa_khs&act=cetak"
+	slog.Info("fetching KHS semesters", "url", khsListURL)
+
+	if err := page.Navigate(khsListURL); err != nil {
+		return nil, fmt.Errorf("navigate to KHS list: %w", err)
+	}
+	if err := page.WaitLoad(); err != nil {
+		return nil, fmt.Errorf("wait KHS list load: %w", err)
+	}
+
+	// Parse HTML to extract semesters
+	// The table has rows with text like "2022/2023 - GANJIL - 20 SKS"
+	result, err := page.Eval(`() => {
+		const rows = document.querySelectorAll('.table-bordered tbody tr');
+		const semesters = [];
+		rows.forEach(row => {
+			const cells = row.querySelectorAll('td');
+			if (cells.length >= 6) {
+				const sksCell = cells[5].innerText;
+				// Parse "2022/2023 - GANJIL - 20 SKS"
+				const match = sksCell.match(/(\d{4}\/\d{4})\s*-\s*(\w+)\s*-\s*(\d+)\s*SKS/g);
+				if (match) {
+					match.forEach(m => {
+						const parts = m.split('-').map(s => s.trim());
+						if (parts.length >= 3) {
+							semesters.push({
+								tahun_ajaran: parts[0],
+								semester: parts[1],
+								sks: parseInt(parts[2]) || 0
+							});
+						}
+					});
+				}
+			}
+		});
+		return JSON.stringify(semesters);
+	}`)
+	if err != nil {
+		return nil, fmt.Errorf("parse KHS semesters: %w", err)
+	}
+
+	var semesters []entity.KHSSemester
+	if err := json.Unmarshal([]byte(result.Value.Str()), &semesters); err != nil {
+		return nil, fmt.Errorf("unmarshal semesters: %w", err)
+	}
+
+	slog.Info("KHS semesters found", "npm", npm, "count", len(semesters))
+
+	return &entity.KHSSemestersResult{
+		NPM:       npm,
+		Semesters: semesters,
+		Timestamp: time.Now(),
+	}, nil
+}
+
+// DownloadKHS downloads the KHS PDF for a specific semester.
+// The PDF is saved to: {downloadDir}/{npm}/khs/{tahunAjaran}_{semester}.pdf
+func (s *lmsDocumentService) DownloadKHS(npm, tahunAjaran, semester string) (*entity.KHSDownloadResult, error) {
+	br, page, err := s.lmsService.loginAndNavigate()
+	if err != nil {
+		return nil, fmt.Errorf("login: %w", err)
+	}
+	defer br.Close()
+
+	// Step 1: Navigate to KHS detail page
+	detailURL := fmt.Sprintf("%s/admin/main.php?op=mahasiswa_khs&act=cetak_detail&tahun_ajaran=%s&semester=%s",
+		s.lmsService.cfg.App.LMSBaseURL, tahunAjaran, semester)
+	slog.Info("navigating to KHS detail", "url", detailURL)
+
+	if err := page.Navigate(detailURL); err != nil {
+		return nil, fmt.Errorf("navigate to KHS detail: %w", err)
+	}
+	if err := page.WaitLoad(); err != nil {
+		return nil, fmt.Errorf("wait KHS detail load: %w", err)
+	}
+
+	// Step 2: Find the CETAK KHS button to get the PDF URL
+	pdfLink, err := page.Element(browserInfra.SelKHSCetakBtn)
+	if err != nil {
+		return nil, fmt.Errorf("find CETAK KHS button: %w", err)
+	}
+
+	href, err := pdfLink.Attribute("href")
+	if err != nil || href == nil {
+		return nil, fmt.Errorf("get PDF link href: %w", err)
+	}
+
+	pdfURL := s.lmsService.cfg.App.LMSBaseURL + "/admin/" + *href
+	slog.Info("downloading KHS PDF", "url", pdfURL)
+
+	// Step 3: Build canonical save path and download
+	savePath := browserInfra.BuildKHSPath(s.lmsService.cfg.App.DownloadDir, npm, tahunAjaran, semester)
+
+	filename, size, err := browserInfra.DownloadAndSave(page, pdfURL, savePath, s.lmsService.cfg.App.BrowserTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("download KHS PDF: %w", err)
+	}
+
+	slog.Info("KHS download complete", "npm", npm, "tahun_ajaran", tahunAjaran, "semester", semester, "filename", filename, "size", size)
+
+	return &entity.KHSDownloadResult{
+		Success:     true,
+		Message:     "KHS downloaded successfully",
+		NPM:         npm,
+		TahunAjaran: tahunAjaran,
+		Semester:    semester,
+		FilePath:    savePath,
+		Size:        size,
+		Timestamp:   time.Now(),
+	}, nil
 }

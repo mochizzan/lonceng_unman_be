@@ -27,6 +27,8 @@ type AppConfig struct {
 	BrowserHeadless bool
 	BrowserTimeout  time.Duration
 	ActionTimeout   time.Duration
+	// Document Download
+	DownloadDir string
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -53,6 +55,7 @@ func New() (*Config, error) {
 			BrowserHeadless: getEnvBool("BROWSER_HEADLESS", true),
 			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 30*time.Second),
 			ActionTimeout:   getEnvDuration("ACTION_TIMEOUT", 10*time.Second),
+			DownloadDir:     getEnv("DOWNLOAD_DIR", "./downloads"),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
@@ -94,6 +97,10 @@ func (c *Config) Validate() error {
 
 	if c.App.ActionTimeout <= 0 {
 		return fmt.Errorf("ACTION_TIMEOUT must be a positive duration; got %v", c.App.ActionTimeout)
+	}
+
+	if c.App.DownloadDir == "" {
+		return fmt.Errorf("DOWNLOAD_DIR must not be empty")
 	}
 
 	return nil
