@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -28,7 +29,7 @@ type CORSConfig struct {
 	AllowHeaders string
 }
 
-// New loads configuration from environment variables.
+// New loads configuration from environment variables and validates it.
 // It attempts to load a .env file first; if missing, it reads from the OS env only.
 func New() (*Config, error) {
 	// Load .env file if present (ignore error if file doesn't exist)
@@ -48,7 +49,34 @@ func New() (*Config, error) {
 		},
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation: %w", err)
+	}
+
 	return cfg, nil
+}
+
+// Validate checks that all configuration values are within acceptable ranges.
+func (c *Config) Validate() error {
+	if c.App.Name == "" {
+		return fmt.Errorf("APP_NAME must not be empty")
+	}
+
+	validEnvs := map[string]bool{"development": true, "staging": true, "production": true}
+	if !validEnvs[c.App.Env] {
+		return fmt.Errorf("APP_ENV must be one of: development, staging, production; got %q", c.App.Env)
+	}
+
+	port, err := strconv.Atoi(c.App.Port)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("APP_PORT must be a valid port number (1-65535); got %q", c.App.Port)
+	}
+
+	if c.App.Host == "" {
+		return fmt.Errorf("APP_HOST must not be empty")
+	}
+
+	return nil
 }
 
 // Addr returns the listen address in "host:port" format.
