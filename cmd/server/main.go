@@ -42,8 +42,12 @@ func main() {
 	healthHandler := handler.NewHealthHandler(healthService)
 	lmsHandler := handler.NewLMSHandler(lmsService)
 
+	// Wire document service
+	docService := service.NewLMSDocumentService(cfg)
+	docHandler := handler.NewDocumentHandler(docService)
+
 	// Register routes
-	router.Setup(app, healthHandler, lmsHandler)
+	router.Setup(app, healthHandler, lmsHandler, docHandler)
 
 	// Start server
 	log.Info(
