@@ -2,11 +2,6 @@ package entity
 
 import "time"
 
-// DownloadRequest represents the input for a document download attempt.
-type DownloadRequest struct {
-	NPM string `json:"npm"`
-}
-
 // KHSSemester represents one semester entry from the KHS list page.
 type KHSSemester struct {
 	TahunAjaran string `json:"tahun_ajaran"` // e.g. "2022/2023"

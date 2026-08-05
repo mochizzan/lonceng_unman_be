@@ -94,14 +94,6 @@ func DownloadAndSave(page *rod.Page, url string, savePath string, timeout time.D
 	return filepath.Base(savePath), len(body), nil
 }
 
-// BuildKRSPath builds the canonical save path for a KRS PDF.
-// Pattern: {downloadDir}/{npm}/krs/{tahunAjaran}_{semester}.pdf
-func BuildKRSPath(downloadDir, npm, tahunAjaran, semester string) string {
-	year := strings.ReplaceAll(tahunAjaran, "/", "_")
-	filename := fmt.Sprintf("%s_%s.pdf", year, semester)
-	return filepath.Join(downloadDir, npm, "krs", filename)
-}
-
 // BuildKHSPath builds the canonical save path for a KHS PDF.
 // Pattern: {downloadDir}/{npm}/khs/{tahunAjaran}_{semester}.pdf
 func BuildKHSPath(downloadDir, npm, tahunAjaran, semester string) string {
