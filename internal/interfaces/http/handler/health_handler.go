@@ -9,11 +9,11 @@ import (
 
 // HealthHandler handles HTTP requests for health checks.
 type HealthHandler struct {
-	healthService *service.HealthService
+	healthService service.HealthChecker
 }
 
 // NewHealthHandler creates a HealthHandler with its dependencies.
-func NewHealthHandler(healthService *service.HealthService) *HealthHandler {
+func NewHealthHandler(healthService service.HealthChecker) *HealthHandler {
 	return &HealthHandler{healthService: healthService}
 }
 
