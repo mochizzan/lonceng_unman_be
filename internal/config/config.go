@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -14,12 +15,18 @@ type Config struct {
 	CORS CORSConfig
 }
 
-// AppConfig holds server-related configuration.
+// AppConfig holds server-related and LMS browser automation configuration.
 type AppConfig struct {
 	Name string
 	Env  string
 	Port string
 	Host string
+	// LMS Browser Automation
+	LMSBaseURL      string
+	LMSDashboardURL string
+	BrowserHeadless bool
+	BrowserTimeout  time.Duration
+	ActionTimeout   time.Duration
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -37,10 +44,15 @@ func New() (*Config, error) {
 
 	cfg := &Config{
 		App: AppConfig{
-			Name: getEnv("APP_NAME", "lonceng_unman_be"),
-			Env:  getEnv("APP_ENV", "development"),
-			Port: getEnv("APP_PORT", "3000"),
-			Host: getEnv("APP_HOST", "0.0.0.0"),
+			Name:            getEnv("APP_NAME", "lonceng_unman_be"),
+			Env:             getEnv("APP_ENV", "development"),
+			Port:            getEnv("APP_PORT", "3000"),
+			Host:            getEnv("APP_HOST", "0.0.0.0"),
+			LMSBaseURL:      getEnv("LMS_BASE_URL", "https://elearning.universitasmandiri.ac.id"),
+			LMSDashboardURL: getEnv("LMS_DASHBOARD_URL", "https://elearning.universitasmandiri.ac.id/admin/"),
+			BrowserHeadless: getEnvBool("BROWSER_HEADLESS", true),
+			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 30*time.Second),
+			ActionTimeout:   getEnvDuration("ACTION_TIMEOUT", 10*time.Second),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
@@ -76,6 +88,14 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("APP_HOST must not be empty")
 	}
 
+	if c.App.BrowserTimeout <= 0 {
+		return fmt.Errorf("BROWSER_TIMEOUT must be a positive duration; got %v", c.App.BrowserTimeout)
+	}
+
+	if c.App.ActionTimeout <= 0 {
+		return fmt.Errorf("ACTION_TIMEOUT must be a positive duration; got %v", c.App.ActionTimeout)
+	}
+
 	return nil
 }
 
@@ -95,4 +115,30 @@ func getEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+// getEnvBool reads a boolean environment variable. Accepts "true", "1", "yes" (case-insensitive).
+func getEnvBool(key string, fallback bool) bool {
+	val := os.Getenv(key)
+	if val == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(val)
+	if err != nil {
+		return fallback
+	}
+	return b
+}
+
+// getEnvDuration reads a duration environment variable (e.g. "30s", "10m").
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	val := os.Getenv(key)
+	if val == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return fallback
+	}
+	return d
 }
