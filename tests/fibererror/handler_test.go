@@ -1,4 +1,4 @@
-package fibererror_test
+package fibererror
 
 import (
 	"errors"

@@ -1,4 +1,4 @@
-package logger_test
+package logger
 
 import (
 	"bytes"
@@ -65,6 +65,8 @@ func TestNew_ProductionReturnsJSONHandler(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Error("expected no debug output in production mode")
 	}
+
+	buf.Reset()
 
 	l.Info("test info message")
 	if buf.Len() == 0 {

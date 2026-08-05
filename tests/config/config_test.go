@@ -1,4 +1,4 @@
-package config_test
+package config
 
 import (
 	"testing"
@@ -53,8 +53,8 @@ func TestNew_InvalidEnv(t *testing.T) {
 }
 
 func TestValidate_EmptyName(t *testing.T) {
-	// getEnv returns the default when APP_NAME is unset or empty, so we
-	// cannot trigger an empty name through New(). Test Validate() directly.
+	// Test Validate() directly since t.Setenv("", "") + getEnv fallback
+	// means New() never receives an empty name.
 	cfg := &config.Config{
 		App: config.AppConfig{Name: "", Env: "development", Port: "3000", Host: "0.0.0.0"},
 	}
@@ -64,7 +64,6 @@ func TestValidate_EmptyName(t *testing.T) {
 }
 
 func TestNew_WithExplicitValues(t *testing.T) {
-	// Verify that explicit env vars are used (not defaults from .env file)
 	t.Setenv("APP_NAME", "my-app")
 	t.Setenv("APP_ENV", "staging")
 	t.Setenv("APP_PORT", "9090")
