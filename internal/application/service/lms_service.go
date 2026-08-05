@@ -204,7 +204,7 @@ func (s *lmsService) loginAndNavigate() (*browserInfra.Browser, *rod.Page, error
 }
 
 // DownloadKRS downloads the KRS PDF for the given NPM.
-// The PDF is saved to: {downloadDir}/{npm}/krs/{tahunAjaran}_{semester}.pdf
+// The PDF is saved to: {downloadDir}/{npm}/krs/krs.pdf
 func (s *lmsDocumentService) DownloadKRS(npm string) (*entity.KRSDownloadResult, error) {
 	br, page, err := s.lmsService.loginAndNavigate()
 	if err != nil {
