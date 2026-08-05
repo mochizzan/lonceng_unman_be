@@ -1,11 +1,18 @@
 package handler
 
 import (
+	"regexp"
+
 	"lonceng_unman_be/internal/apperror"
 	"lonceng_unman_be/internal/application/service"
 	"lonceng_unman_be/internal/interfaces/http/response"
 
 	"github.com/gofiber/fiber/v3"
+)
+
+var (
+	npmRegexp      = regexp.MustCompile(`^[0-9]+$`)
+	semesterRegexp = regexp.MustCompile(`^(GANJIL|GENAP)$`)
 )
 
 // DocumentHandler handles HTTP requests for document download operations.
@@ -24,6 +31,9 @@ func (h *DocumentHandler) DownloadKRS(c fiber.Ctx) error {
 	if npm == "" {
 		return apperror.BadRequest("npm query parameter is required")
 	}
+	if !npmRegexp.MatchString(npm) {
+		return apperror.BadRequest("npm must contain only digits")
+	}
 
 	result, err := h.docService.DownloadKRS(npm)
 	if err != nil {
@@ -38,6 +48,9 @@ func (h *DocumentHandler) GetKHSSemesters(c fiber.Ctx) error {
 	npm := c.Query("npm")
 	if npm == "" {
 		return apperror.BadRequest("npm query parameter is required")
+	}
+	if !npmRegexp.MatchString(npm) {
+		return apperror.BadRequest("npm must contain only digits")
 	}
 
 	result, err := h.docService.GetKHSSemesters(npm)
@@ -57,11 +70,17 @@ func (h *DocumentHandler) DownloadKHS(c fiber.Ctx) error {
 	if npm == "" {
 		return apperror.BadRequest("npm query parameter is required")
 	}
+	if !npmRegexp.MatchString(npm) {
+		return apperror.BadRequest("npm must contain only digits")
+	}
 	if tahunAjaran == "" {
 		return apperror.BadRequest("tahun_ajaran query parameter is required")
 	}
 	if semester == "" {
 		return apperror.BadRequest("semester query parameter is required")
+	}
+	if !semesterRegexp.MatchString(semester) {
+		return apperror.BadRequest("semester must be GANJIL or GENAP")
 	}
 
 	result, err := h.docService.DownloadKHS(npm, tahunAjaran, semester)
