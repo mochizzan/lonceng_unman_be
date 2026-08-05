@@ -28,3 +28,6 @@ Thumbs.db
 
 # Superpowers scratch
 .superpowers/
+
+# Agent instructions (local only)
+AGENTS.md
