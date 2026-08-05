@@ -1,0 +1,25 @@
+package browser
+
+// CSS selectors for the LMS login and dashboard pages.
+// All selectors confirmed from live DOM inspection and network traffic analysis.
+// Centralized here so changes to the LMS frontend require edits in one place only.
+const (
+	// Login form fields (confirmed from LMS HTML)
+	SelUsernameInput = "#username"
+	SelPasswordInput = "input[name='password']"
+	SelSubmitButton  = "input[type='submit']"
+
+	// Login result indicators (confirmed from network traffic + DOM)
+	// On success: browser redirects to /admin/ which contains .wrapper
+	// On failure: browser stays at / with .alert-danger
+	SelSuccessIndicator = ".wrapper"
+	SelErrorIndicator   = ".alert-danger"
+
+	// Alternative success indicators (for URL-based detection, not used in Race)
+	SelDashboardHeader  = ".main-header"
+	SelDashboardSidebar = ".main-sidebar"
+
+	// Post-login data extraction
+	SelUserNPM  = ".user-panel .info p" // NPM in sidebar
+	SelUserName = ".user-header p"      // full name in user dropdown
+)

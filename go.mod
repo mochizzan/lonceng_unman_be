@@ -3,13 +3,13 @@ module lonceng_unman_be
 go 1.26.4
 
 require (
+	github.com/go-rod/rod v0.116.2
 	github.com/gofiber/fiber/v3 v3.4.0
 	github.com/joho/godotenv v1.5.1
 )
 
 require (
 	github.com/andybalholm/brotli v1.2.2 // indirect
-	github.com/go-rod/rod v0.116.2 // indirect
 	github.com/gofiber/schema v1.8.0 // indirect
 	github.com/gofiber/utils/v2 v2.1.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
