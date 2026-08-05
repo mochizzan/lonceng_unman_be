@@ -260,7 +260,7 @@ func (s *lmsDocumentService) GetKHSSemesters(npm string) (*entity.KHSSemestersRe
 	// Parse HTML to extract semesters
 	// The table has rows with text like "2022/2023 - GANJIL - 20 SKS"
 	result, err := page.Eval(`() => {
-		const rows = document.querySelectorAll('.table-bordered tbody tr');
+		const rows = document.querySelectorAll('` + browserInfra.SelKHSTable + ` tbody tr');
 		const semesters = [];
 		rows.forEach(row => {
 			const cells = row.querySelectorAll('td');
