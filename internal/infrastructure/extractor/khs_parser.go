@@ -8,6 +8,24 @@ import (
 	"lonceng_unman_be/internal/domain/entity"
 )
 
+// indonesianMonthsKHS maps Indonesian month names to English for date parsing.
+// Kept as separate var from krs_parser to avoid redeclaration in same package.
+var indonesianMonthsKHS = map[string]string{
+	"Januari": "January", "Februari": "February", "Maret": "March",
+	"April": "April", "Mei": "May", "Juni": "June",
+	"Juli": "July", "Agustus": "August", "September": "September",
+	"Oktober": "October", "November": "November", "Desember": "December",
+}
+
+// dateFormatsKHS lists Go time.Parse formats to try for Indonesian dates.
+var dateFormatsKHS = []string{"2 January 2006", "02 January 2006", "January 2, 2006"}
+
+// dateOutputFormatKHS is the ISO date format used for output.
+const dateOutputFormatKHS = "2006-01-02"
+
+// MaxSKSKHS is the maximum plausible SKS credit value.
+const MaxSKSKHS = 12
+
 // ParseKHS extracts structured KHS data from a PDF file.
 // It uses ReadPDF (plain text) for header fields to preserve word spacing,
 // and ReadPDFWithPosition for table data that needs column positions.
@@ -42,52 +60,6 @@ func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*en
 	result.Metadata.SourceFile = path
 
 	return result, nil
-}
-
-// parseKHSHeader extracts student info from header section.
-func parseKHSHeader(lines []string, result *entity.KHSExtraction) {
-	for i, line := range lines {
-		normalized := NormalizeLabel(line)
-
-		// Look for student name pattern: "Nama : XXXX" or "Nama" + next line ": XXXX"
-		if strings.Contains(normalized, "Nama") {
-			if strings.Contains(line, ":") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					result.KHS.Mahasiswa.Nama = strings.TrimSpace(parts[1])
-				}
-			} else if val := FindNextValueLine(lines, i); val != "" {
-				result.KHS.Mahasiswa.Nama = val
-			}
-		}
-
-		// Look for NPM pattern: "NPM : XXXX" or "N P M" + next line ": XXXX"
-		if strings.Contains(normalized, "NPM") {
-			if strings.Contains(line, ":") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					npm := strings.TrimSpace(parts[1])
-					if npm != "" {
-						result.KHS.Mahasiswa.NPM = npm
-					}
-				}
-			} else if val := FindNextValueLine(lines, i); val != "" {
-				result.KHS.Mahasiswa.NPM = val
-			}
-		}
-
-		// Look for program studi: "Program Studi : XXXX" or "Program Studi" + next line ": XXXX"
-		if strings.Contains(normalized, "Program Studi") {
-			if strings.Contains(line, ":") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					result.KHS.Mahasiswa.ProgramStudi = strings.TrimSpace(parts[1])
-				}
-			} else if val := FindNextValueLine(lines, i); val != "" {
-				result.KHS.Mahasiswa.ProgramStudi = val
-			}
-		}
-	}
 }
 
 // parsePlainTextHeaderKHS extracts header fields from plain text output.
@@ -188,7 +160,7 @@ func parseKHSMataKuliah(rows []PDFRow, lines []string, result *entity.KHSExtract
 
 			// Get dosen and SKS
 			for j := 3; j < len(words); j++ {
-				if sks := parseIntSafe(words[j].Text); sks > 0 && sks <= 12 {
+				if sks := parseIntSafe(words[j].Text); sks > 0 && sks <= MaxSKSKHS {
 					course.SKS = sks
 					break
 				}
@@ -247,14 +219,6 @@ func parseKHSRekapitulasi(lines []string, result *entity.KHSExtraction) {
 // parseKHSPenerbitan extracts publication info from KHS.
 // Handles Indonesian date formats: "6 Agustus 2026", "06 Agustus 2026"
 func parseKHSPenerbitan(lines []string, result *entity.KHSExtraction) {
-	// Indonesian month names
-	indonesianMonths := map[string]string{
-		"Januari": "January", "Februari": "February", "Maret": "March",
-		"April": "April", "Mei": "May", "Juni": "June",
-		"Juli": "July", "Agustus": "August", "September": "September",
-		"Oktober": "October", "November": "November", "Desember": "December",
-	}
-
 	for _, line := range lines {
 		normalized := NormalizeLabel(line)
 		// Look for "Dikeluarkan di" pattern
@@ -265,7 +229,7 @@ func parseKHSPenerbitan(lines []string, result *entity.KHSExtraction) {
 				dateStr := strings.TrimSpace(parts[1])
 
 				// Try Indonesian date format first
-				for indo, eng := range indonesianMonths {
+				for indo, eng := range indonesianMonthsKHS {
 					if strings.Contains(dateStr, indo) {
 						dateStr = strings.Replace(dateStr, indo, eng, 1)
 						break
@@ -273,10 +237,9 @@ func parseKHSPenerbitan(lines []string, result *entity.KHSExtraction) {
 				}
 
 				// Try multiple date formats
-				dateFormats := []string{"2 January 2006", "02 January 2006", "January 2, 2006"}
-				for _, format := range dateFormats {
+				for _, format := range dateFormatsKHS {
 					if t, err := time.Parse(format, dateStr); err == nil {
-						result.KHS.Penerbitan.Tanggal = t.Format("2006-01-02")
+						result.KHS.Penerbitan.Tanggal = t.Format(dateOutputFormatKHS)
 						break
 					}
 				}
