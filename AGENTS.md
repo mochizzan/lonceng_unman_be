@@ -209,7 +209,7 @@ internal/
     │   ├── selectors.go              ← CSS selectors + URL paths for LMS
     │   └── download.go               ← PDF download via JS fetch()
     ├── session/
-    │   ├── manager.go                ← In-memory session cache with TTL
+    │   ├── manager.go                ← In-memory session cache with TTL + Chrome profile persistence
     │   └── session.go                ← rodSession: thread-safe BrowserSession impl
 │   └── extractor/
 │       ├── pdf_reader.go             ← PDF text extraction with positional data
@@ -384,6 +384,7 @@ recover → requestid → logger → cors
 | `EXTRACT_DIR` | `./extracted` | Extraction cache directory |
 | `SESSION_TTL` | `15m` | Session cache TTL before expiry |
 | `MAX_SESSIONS` | `10` | Maximum concurrent browser sessions |
+| `PROFILE_BASE_DIR` | `./profiles` | Base directory for persistent Chrome profiles |
 | `MAX_BODY_SIZE` | `1MB` | Max HTTP request body size |
 | `MAX_PDF_SIZE` | `50MB` | Max PDF file size for extraction |
 | `CORS_ALLOW_ORIGINS` | `*` | CORS allowed origins |
@@ -445,7 +446,7 @@ codegraph explore "DownloadPDF"
 | Wire new dependencies | `cmd/server/main.go` |
 | Change error handling | `internal/infrastructure/fibererror/handler.go` |
 | Add browser automation | `internal/infrastructure/browser/` |
-| Add session management | `internal/infrastructure/session/` |
+|| Add/manage session persistence | `internal/infrastructure/session/manager.go` + `PROFILE_BASE_DIR` env var |
 | Add PDF extraction | `internal/infrastructure/extractor/` |
 | Add LMS login endpoint | `internal/interfaces/http/handler/lms_handler.go` |
 | Add document download | `internal/interfaces/http/handler/document_handler.go` + `service/lms_service.go` |
