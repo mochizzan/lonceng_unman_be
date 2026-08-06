@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"lonceng_unman_be/internal/apperror"
 	"lonceng_unman_be/internal/domain/entity"
+	"lonceng_unman_be/internal/domain/port"
 	"lonceng_unman_be/internal/infrastructure/extractor"
 )
 
@@ -24,20 +28,27 @@ type extractionService struct {
 	downloadDir string
 	extractDir  string
 	cache       *extractor.CacheManager
+	sessions    port.SessionManager
 }
 
 // NewExtractionService creates a new extraction service.
-func NewExtractionService(downloadDir string, extractDir string) ExtractionService {
+func NewExtractionService(downloadDir string, extractDir string, sessions port.SessionManager) ExtractionService {
 	return &extractionService{
 		downloadDir: downloadDir,
 		extractDir:  extractDir,
 		cache:       extractor.NewCacheManager(extractDir),
+		sessions:    sessions,
 	}
 }
 
 // ExtractKRS extracts KRS data from the downloaded PDF.
 // Always re-extracts and overwrites existing cache.
 func (s *extractionService) ExtractKRS(npm string, password string) (*entity.ExtractionResult, error) {
+	// Verify LMS credentials before extraction
+	if _, err := s.sessions.GetOrCreate(npm, password); err != nil {
+		return nil, apperror.Unauthorized("LMS login failed: " + err.Error())
+	}
+
 	// Find the KRS PDF file
 	pdfPath, err := s.findKRSFile(npm)
 	if err != nil {
@@ -80,6 +91,13 @@ func (s *extractionService) ExtractKRS(npm string, password string) (*entity.Ext
 // ExtractKHS extracts KHS data from the downloaded PDF.
 // Always re-extracts and overwrites existing cache.
 func (s *extractionService) ExtractKHS(npm string, password string, tahunAjaran string, semester string) (*entity.ExtractionResult, error) {
+	// Verify LMS credentials before extraction
+	if _, err := s.sessions.GetOrCreate(npm, password); err != nil {
+		return nil, apperror.Unauthorized("LMS login failed: " + err.Error())
+	}
+
+	semester = strings.ToUpper(semester)
+
 	// Find the KHS PDF file
 	pdfPath, err := s.findKHSFile(npm, tahunAjaran, semester)
 	if err != nil {
@@ -125,11 +143,14 @@ func (s *extractionService) GetKRSExtraction(npm string) ([]byte, error) {
 	krsDir := filepath.Join(s.extractDir, npm, "krs")
 	entries, err := os.ReadDir(krsDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("no krs extraction for npm %s: %w", npm, apperror.ErrExtractionNotFound)
+		}
 		return nil, fmt.Errorf("read krs dir: %w", err)
 	}
 
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("no krs extraction found for npm %s", npm)
+		return nil, fmt.Errorf("no krs extraction for npm %s: %w", npm, apperror.ErrExtractionNotFound)
 	}
 
 	// Get the latest file
@@ -146,24 +167,58 @@ func (s *extractionService) GetKRSExtraction(npm string) ([]byte, error) {
 // GetKHSExtraction retrieves cached KHS extraction.
 func (s *extractionService) GetKHSExtraction(npm string, tahunAjaran string, semester string) ([]byte, error) {
 	cacheFile := s.khsCacheFilename(tahunAjaran, semester)
-	return s.cache.Get(npm, "khs", cacheFile)
+	data, err := s.cache.Get(npm, "khs", cacheFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("no khs extraction for npm %s: %w", npm, apperror.ErrExtractionNotFound)
+		}
+		return nil, err
+	}
+	return data, nil
 }
 
-// findKRSFile finds the KRS PDF file for a given NPM.
+// findKRSFile finds the latest KRS PDF file for a given NPM.
+// Files are named semester_<N>.pdf; this sorts by numeric N and returns the highest.
 func (s *extractionService) findKRSFile(npm string) (string, error) {
 	krsDir := filepath.Join(s.downloadDir, npm, "krs")
 	entries, err := os.ReadDir(krsDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("no krs directory for npm %s: %w", npm, apperror.ErrPDFNotFound)
+		}
 		return "", fmt.Errorf("read krs dir: %w", err)
 	}
 
+	type pdfEntry struct {
+		path string
+		num  int
+	}
+	var pdfs []pdfEntry
 	for _, e := range entries {
 		if filepath.Ext(e.Name()) == ".pdf" {
-			return filepath.Join(krsDir, e.Name()), nil
+			num := extractSemesterNum(e.Name())
+			pdfs = append(pdfs, pdfEntry{path: filepath.Join(krsDir, e.Name()), num: num})
 		}
 	}
 
-	return "", fmt.Errorf("no krs pdf found for npm %s", npm)
+	if len(pdfs) == 0 {
+		return "", fmt.Errorf("no krs pdf for npm %s: %w", npm, apperror.ErrPDFNotFound)
+	}
+
+	sort.Slice(pdfs, func(i, j int) bool { return pdfs[i].num > pdfs[j].num })
+	return pdfs[0].path, nil
+}
+
+// extractSemesterNum extracts the numeric semester from a filename like "semester_9.pdf".
+func extractSemesterNum(filename string) int {
+	name := strings.TrimSuffix(filename, filepath.Ext(filename))
+	parts := strings.SplitN(name, "_", 2)
+	if len(parts) == 2 {
+		if n, err := strconv.Atoi(parts[1]); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // findKHSFile finds the KHS PDF file for a given NPM, tahun ajaran, and semester.
@@ -173,7 +228,10 @@ func (s *extractionService) findKHSFile(npm string, tahunAjaran string, semester
 	path := filepath.Join(khsDir, filename)
 
 	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("khs pdf not found: %s", path)
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("khs pdf not found: %s: %w", path, apperror.ErrPDFNotFound)
+		}
+		return "", fmt.Errorf("stat khs pdf: %w", err)
 	}
 
 	return path, nil
@@ -195,13 +253,14 @@ func (s *extractionService) getKRSSemester(pdfPath string) string {
 
 // khsFilename generates the canonical KHS filename.
 func (s *extractionService) khsFilename(tahunAjaran string, semester string) string {
-	// Replace / with _ in tahun_ajaran
+	semester = strings.ToUpper(semester)
 	tahun := strings.Replace(tahunAjaran, "/", "_", -1)
 	return fmt.Sprintf("%s_%s.pdf", tahun, semester)
 }
 
 // khsCacheFilename generates the KHS cache filename.
 func (s *extractionService) khsCacheFilename(tahunAjaran string, semester string) string {
+	semester = strings.ToUpper(semester)
 	tahun := strings.Replace(tahunAjaran, "/", "_", -1)
 	return fmt.Sprintf("%s_%s.json", tahun, semester)
 }
