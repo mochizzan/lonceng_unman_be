@@ -37,6 +37,8 @@ type AppConfig struct {
 	// Server Limits
 	MaxBodySize int64
 	MaxPDFSize  int64
+	// Session Persistence
+	ProfileBaseDir string
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -67,6 +69,7 @@ func New() (*Config, error) {
 			ExtractDir:      getEnv("EXTRACT_DIR", "./extracted"),
 			SessionTTL:      getEnvDuration("SESSION_TTL", 15*time.Minute),
 			MaxSessions:     getEnvInt("MAX_SESSIONS", 10),
+			ProfileBaseDir:  getEnv("PROFILE_BASE_DIR", "./profiles"),
 			MaxBodySize:     parseByteSize(getEnv("MAX_BODY_SIZE", "1MB")),
 			MaxPDFSize:      parseByteSize(getEnv("MAX_PDF_SIZE", "50MB")),
 		},
