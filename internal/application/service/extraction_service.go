@@ -36,23 +36,12 @@ func NewExtractionService(downloadDir string, extractDir string) ExtractionServi
 }
 
 // ExtractKRS extracts KRS data from the downloaded PDF.
+// Always re-extracts and overwrites existing cache.
 func (s *extractionService) ExtractKRS(npm string, password string) (*entity.ExtractionResult, error) {
 	// Find the KRS PDF file
 	pdfPath, err := s.findKRSFile(npm)
 	if err != nil {
 		return nil, fmt.Errorf("find krs file: %w", err)
-	}
-
-	// Check cache first
-	cacheFile := "semester_" + s.getKRSSemester(pdfPath) + ".json"
-	if s.cache.Exists(npm, "krs", cacheFile) {
-		return &entity.ExtractionResult{
-			Success:   true,
-			Message:   "KRS extraction loaded from cache",
-			NPM:       npm,
-			FilePath:  filepath.Join(s.extractDir, npm, "krs", cacheFile),
-			Timestamp: time.Now(),
-		}, nil
 	}
 
 	// Parse PDF
@@ -73,7 +62,8 @@ func (s *extractionService) ExtractKRS(npm string, password string) (*entity.Ext
 		return nil, fmt.Errorf("marshal json: %w", err)
 	}
 
-	// Save to cache
+	// Save to cache (overwrite if exists)
+	cacheFile := "semester_" + s.getKRSSemester(pdfPath) + ".json"
 	if err := s.cache.Set(npm, "krs", cacheFile, data); err != nil {
 		return nil, fmt.Errorf("save cache: %w", err)
 	}
@@ -88,23 +78,12 @@ func (s *extractionService) ExtractKRS(npm string, password string) (*entity.Ext
 }
 
 // ExtractKHS extracts KHS data from the downloaded PDF.
+// Always re-extracts and overwrites existing cache.
 func (s *extractionService) ExtractKHS(npm string, password string, tahunAjaran string, semester string) (*entity.ExtractionResult, error) {
 	// Find the KHS PDF file
 	pdfPath, err := s.findKHSFile(npm, tahunAjaran, semester)
 	if err != nil {
 		return nil, fmt.Errorf("find khs file: %w", err)
-	}
-
-	// Check cache first
-	cacheFile := s.khsCacheFilename(tahunAjaran, semester)
-	if s.cache.Exists(npm, "khs", cacheFile) {
-		return &entity.ExtractionResult{
-			Success:   true,
-			Message:   "KHS extraction loaded from cache",
-			NPM:       npm,
-			FilePath:  filepath.Join(s.extractDir, npm, "khs", cacheFile),
-			Timestamp: time.Now(),
-		}, nil
 	}
 
 	// Parse PDF
@@ -125,7 +104,8 @@ func (s *extractionService) ExtractKHS(npm string, password string, tahunAjaran 
 		return nil, fmt.Errorf("marshal json: %w", err)
 	}
 
-	// Save to cache
+	// Save to cache (overwrite if exists)
+	cacheFile := s.khsCacheFilename(tahunAjaran, semester)
 	if err := s.cache.Set(npm, "khs", cacheFile, data); err != nil {
 		return nil, fmt.Errorf("save cache: %w", err)
 	}

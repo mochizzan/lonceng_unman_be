@@ -623,7 +623,7 @@ Response envelope → JSON output
 
 ### 6. Extract KRS
 
-Extract structured data from downloaded KRS PDF.
+Extract structured data from downloaded KRS PDF. Always re-extracts and overwrites existing cache.
 
 ```
 POST /api/v1/lms/krs/extract
@@ -653,12 +653,14 @@ Content-Type: application/json
     "success": true,
     "message": "KRS extracted successfully",
     "npm": "2211700006",
-    "file_path": "extractions/2211700006/krs/semester_8.json",
     "timestamp": "2026-08-06T12:45:00+07:00"
   },
   "message": "KRS extracted successfully"
 }
 ```
+
+> **Note:** This endpoint always re-extracts and overwrites existing cache.
+> Use GET `/api/v1/lms/krs/data/:npm` to retrieve cached data.
 
 **Response 400 Bad Request — Missing NPM:**
 
@@ -718,7 +720,7 @@ curl -X POST http://localhost:3000/api/v1/lms/krs/extract \
 
 ### 7. Extract KHS
 
-Extract structured data from downloaded KHS PDF.
+Extract structured data from downloaded KHS PDF. Always re-extracts and overwrites existing cache.
 
 ```
 POST /api/v1/lms/khs/extract
@@ -752,12 +754,14 @@ Content-Type: application/json
     "success": true,
     "message": "KHS extracted successfully",
     "npm": "2211700006",
-    "file_path": "extractions/2211700006/khs/2022_2023_GENAP.json",
     "timestamp": "2026-08-06T12:45:00+07:00"
   },
   "message": "KHS extracted successfully"
 }
 ```
+
+> **Note:** This endpoint always re-extracts and overwrites existing cache.
+> Use GET `/api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester` to retrieve cached data.
 
 **Response 400 Bad Request — Missing NPM:**
 

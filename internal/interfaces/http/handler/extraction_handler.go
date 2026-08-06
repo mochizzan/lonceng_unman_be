@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"lonceng_unman_be/internal/apperror"
@@ -20,6 +21,15 @@ func NewExtractionHandler(extractionSvc service.ExtractionService) *ExtractionHa
 	return &ExtractionHandler{extractionSvc: extractionSvc}
 }
 
+// ExtractionResponse represents the response for extraction endpoints.
+// Returns success/error status only, not the extracted data.
+type ExtractionResponse struct {
+	Success   bool      `json:"success"`
+	Message   string    `json:"message"`
+	NPM       string    `json:"npm"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // KRSExtractionRequest represents the request body for KRS extraction.
 type KRSExtractionRequest struct {
 	NPM      string `json:"npm"`
@@ -35,6 +45,7 @@ type KHSExtractionRequest struct {
 }
 
 // ExtractKRS handles POST /api/v1/lms/krs/extract
+// Always re-extracts and overwrites existing cache.
 func (h *ExtractionHandler) ExtractKRS(c fiber.Ctx) error {
 	var req KRSExtractionRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -57,10 +68,18 @@ func (h *ExtractionHandler) ExtractKRS(c fiber.Ctx) error {
 		return apperror.Internal("KRS extraction failed", err)
 	}
 
-	return response.Success(c, fiber.StatusOK, result, "KRS extracted successfully")
+	resp := ExtractionResponse{
+		Success:   result.Success,
+		Message:   result.Message,
+		NPM:       result.NPM,
+		Timestamp: result.Timestamp,
+	}
+
+	return response.Success(c, fiber.StatusOK, resp, "KRS extracted successfully")
 }
 
 // ExtractKHS handles POST /api/v1/lms/khs/extract
+// Always re-extracts and overwrites existing cache.
 func (h *ExtractionHandler) ExtractKHS(c fiber.Ctx) error {
 	var req KHSExtractionRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -89,7 +108,14 @@ func (h *ExtractionHandler) ExtractKHS(c fiber.Ctx) error {
 		return apperror.Internal("KHS extraction failed", err)
 	}
 
-	return response.Success(c, fiber.StatusOK, result, "KHS extracted successfully")
+	resp := ExtractionResponse{
+		Success:   result.Success,
+		Message:   result.Message,
+		NPM:       result.NPM,
+		Timestamp: result.Timestamp,
+	}
+
+	return response.Success(c, fiber.StatusOK, resp, "KHS extracted successfully")
 }
 
 // GetKRS handles GET /api/v1/lms/krs/data/:npm
