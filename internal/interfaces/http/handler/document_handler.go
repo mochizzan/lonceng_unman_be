@@ -11,10 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-var (
-	npmRegexp      = regexp.MustCompile(`^[0-9]+$`)
-	semesterRegexp = regexp.MustCompile(`^(GANJIL|GENAP)$`)
-)
+var npmRegexp = regexp.MustCompile(`^[0-9]+$`)
 
 // DocumentHandler handles HTTP requests for document download operations.
 type DocumentHandler struct {
@@ -26,13 +23,16 @@ func NewDocumentHandler(docService service.LMSDocumentService) *DocumentHandler 
 	return &DocumentHandler{docService: docService}
 }
 
-// validateNPM checks that the NPM is non-empty and contains only digits.
+// validateNPM checks that the NPM is non-empty, contains only digits, and is 8-12 characters.
 func validateNPM(npm string) error {
 	if npm == "" {
 		return apperror.BadRequest("npm is required")
 	}
 	if !npmRegexp.MatchString(npm) {
 		return apperror.BadRequest("npm must contain only digits")
+	}
+	if len(npm) < 8 || len(npm) > 12 {
+		return apperror.BadRequest("npm must be 8-12 characters")
 	}
 	return nil
 }
@@ -99,9 +99,6 @@ func (h *DocumentHandler) DownloadKHS(c fiber.Ctx) error {
 	}
 	if req.Semester == "" {
 		return apperror.BadRequest("semester is required")
-	}
-	if !semesterRegexp.MatchString(req.Semester) {
-		return apperror.BadRequest("semester must be GANJIL or GENAP")
 	}
 
 	result, err := h.docService.DownloadKHS(req)

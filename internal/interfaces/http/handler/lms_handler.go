@@ -26,8 +26,8 @@ func (h *LMSHandler) Login(c fiber.Ctx) error {
 		return apperror.BadRequest("invalid request body: " + err.Error())
 	}
 
-	if req.NPM == "" {
-		return apperror.BadRequest("npm is required")
+	if err := validateNPM(req.NPM); err != nil {
+		return err
 	}
 	if req.Password == "" {
 		return apperror.BadRequest("password is required")
