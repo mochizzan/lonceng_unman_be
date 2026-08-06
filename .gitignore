@@ -54,8 +54,10 @@ _dist/
 *.log
 
 # ============================================
-# Superpowers / Agent scratch
+# Agent tools / scratch
 # ============================================
+.codegraph/
+.omp/
 .superpowers/
 docs/
 
@@ -103,6 +105,8 @@ pnpm-lock.yaml
 # ============================================
 downloads/
 extracted/
+downloads/2211700006/
+extracted/2211700006/
 
 # ============================================
 # Misc
@@ -112,3 +116,4 @@ temp/
 .cache/
 *.tmp
 *.bak
+AGENTS.md
