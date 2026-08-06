@@ -53,6 +53,8 @@ All LMS endpoints require `npm` + `password` in the JSON body. Sessions are cach
 - **Max 10 sessions** → LRU eviction when limit reached
 - **Concurrent requests** with same NPM → safe via per-NPM mutex
 
+Sessions are cleaned up every 1 minute by a background goroutine. A session may remain cached up to 16 minutes (15 min TTL + 1 min cleanup interval).
+
 ---
 
 ## Endpoints
@@ -113,7 +115,7 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `npm` | string | Yes | NPM (Nomor Pokok Mahasiswa) |
+| `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 | `password` | string | Yes | LMS password |
 
 **Response 200 OK — Login Success:**
@@ -179,6 +181,16 @@ Content-Type: application/json
 }
 ```
 
+**Response 400 Bad Request — NPM Length:**
+
+```json
+{
+  "status": "error",
+  "message": "npm must be 8-12 characters",
+  "trace_id": "abc123..."
+}
+```
+
 **Response 500 Internal Server Error — Browser Failure:**
 
 ```json
@@ -234,7 +246,7 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `npm` | string | Yes | NPM (digits only, regex: `^[0-9]+$`) |
+| `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 | `password` | string | Yes | LMS password |
 
 **Response 200 OK:**
@@ -279,6 +291,16 @@ Content-Type: application/json
 {
   "status": "error",
   "message": "npm must contain only digits",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — NPM Length:**
+
+```json
+{
+  "status": "error",
+  "message": "npm must be 8-12 characters",
   "trace_id": "abc123..."
 }
 ```
@@ -343,7 +365,7 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `npm` | string | Yes | NPM (digits only, regex: `^[0-9]+$`) |
+| `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 | `password` | string | Yes | LMS password |
 
 **Response 200 OK:**
@@ -391,6 +413,16 @@ Content-Type: application/json
 {
   "status": "error",
   "message": "npm is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — NPM Length:**
+
+```json
+{
+  "status": "error",
+  "message": "npm must be 8-12 characters",
   "trace_id": "abc123..."
 }
 ```
@@ -447,7 +479,7 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `npm` | string | Yes | NPM (digits only, regex: `^[0-9]+$`) |
+| `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 | `password` | string | Yes | LMS password |
 | `tahun_ajaran` | string | Yes | Academic year (format: `YYYY/YYYY`, e.g. `2022/2023`) |
 | `semester` | string | Yes | Semester (`GANJIL` or `GENAP`, case-sensitive) |
@@ -528,6 +560,16 @@ Content-Type: application/json
 {
   "status": "error",
   "message": "npm must contain only digits",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — NPM Length:**
+
+```json
+{
+  "status": "error",
+  "message": "npm must be 8-12 characters",
   "trace_id": "abc123..."
 }
 ```
@@ -641,7 +683,7 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `npm` | string | Yes | NPM (digits only) |
+| `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 | `password` | string | Yes | LMS password |
 
 **Response 200 OK:**
@@ -653,6 +695,7 @@ Content-Type: application/json
     "success": true,
     "message": "KRS extracted successfully",
     "npm": "2211700006",
+    "file_path": "extracted/2211700006/krs/semester_8.json",
     "timestamp": "2026-08-06T12:45:00+07:00"
   },
   "message": "KRS extracted successfully"
@@ -681,6 +724,28 @@ Content-Type: application/json
   "trace_id": "abc123..."
 }
 ```
+
+**Response 400 Bad Request — NPM Length:**
+
+```json
+{
+  "status": "error",
+  "message": "npm must be 8-12 characters",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 401 Unauthorized — LMS Login Failed:**
+
+```json
+{
+  "status": "error",
+  "message": "LMS login failed: ...",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Returns 401 when LMS credentials are invalid.
 
 **Response 404 Not Found — PDF Not Found:**
 
@@ -740,7 +805,7 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `npm` | string | Yes | NPM (digits only) |
+| `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 | `password` | string | Yes | LMS password |
 | `tahun_ajaran` | string | Yes | Academic year (e.g. `2022/2023`) |
 | `semester` | string | Yes | Semester (`GANJIL` or `GENAP`) |
@@ -754,6 +819,7 @@ Content-Type: application/json
     "success": true,
     "message": "KHS extracted successfully",
     "npm": "2211700006",
+    "file_path": "extracted/2211700006/khs/2022_2023_GENAP.json",
     "timestamp": "2026-08-06T12:45:00+07:00"
   },
   "message": "KHS extracted successfully"
@@ -803,6 +869,28 @@ Content-Type: application/json
 }
 ```
 
+**Response 400 Bad Request — NPM Length:**
+
+```json
+{
+  "status": "error",
+  "message": "npm must be 8-12 characters",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 401 Unauthorized — LMS Login Failed:**
+
+```json
+{
+  "status": "error",
+  "message": "LMS login failed: ...",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Returns 401 when LMS credentials are invalid.
+
 **Response 404 Not Found — PDF Not Found:**
 
 ```json
@@ -851,7 +939,7 @@ GET /api/v1/lms/krs/data/:npm
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `npm` | string | Yes | NPM (digits only) |
+| `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 
 **Response 200 OK:**
 
@@ -892,6 +980,16 @@ GET /api/v1/lms/krs/data/:npm
 }
 ```
 
+**Response 400 Bad Request — NPM Length:**
+
+```json
+{
+  "status": "error",
+  "message": "npm must be 8-12 characters",
+  "trace_id": "abc123..."
+}
+```
+
 **Response 404 Not Found — Extraction Data Not Found:**
 
 ```json
@@ -905,12 +1003,24 @@ GET /api/v1/lms/krs/data/:npm
 > **Note:** Returns 404 when no cached extraction exists for the given NPM.
 > Call POST `/api/v1/lms/krs/extract` first to create extraction data.
 
+**Response 403 Forbidden — Permission Denied:**
+
+```json
+{
+  "status": "error",
+  "message": "permission denied accessing KRS extraction",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Returns 403 when file permission is denied.
+
 **Response 500 Internal Server Error — Read Failed:**
 
 ```json
 {
   "status": "error",
-  "message": "failed to read extraction data",
+  "message": "failed to retrieve KRS extraction",
   "trace_id": "abc123..."
 }
 ```
@@ -935,7 +1045,7 @@ GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `npm` | string | Yes | NPM (digits only) |
+| `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 | `tahun_ajaran` | string | Yes | Academic year (e.g. `2022/2023`) |
 | `semester` | string | Yes | Semester (`GANJIL` or `GENAP`) |
 
@@ -972,22 +1082,22 @@ GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
 }
 ```
 
-**Response 400 Bad Request — Missing Tahun Ajaran:**
+**Response 400 Bad Request — Missing Parameters:**
 
 ```json
 {
   "status": "error",
-  "message": "tahun_ajaran is required",
+  "message": "tahun_ajaran and semester parameters are required",
   "trace_id": "abc123..."
 }
 ```
 
-**Response 400 Bad Request — Missing Semester:**
+**Response 400 Bad Request — NPM Length:**
 
 ```json
 {
   "status": "error",
-  "message": "semester is required",
+  "message": "npm must be 8-12 characters",
   "trace_id": "abc123..."
 }
 ```
@@ -1005,12 +1115,24 @@ GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
 > **Note:** Returns 404 when no cached extraction exists for the given NPM/tahun_ajaran/semester.
 > Call POST `/api/v1/lms/khs/extract` first to create extraction data.
 
+**Response 403 Forbidden — Permission Denied:**
+
+```json
+{
+  "status": "error",
+  "message": "permission denied accessing KHS extraction",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Returns 403 when file permission is denied.
+
 **Response 500 Internal Server Error — Read Failed:**
 
 ```json
 {
   "status": "error",
-  "message": "failed to read extraction data",
+  "message": "failed to retrieve KHS extraction",
   "trace_id": "abc123..."
 }
 ```
@@ -1025,11 +1147,13 @@ curl http://localhost:3000/api/v1/lms/khs/data/2211700006/2022/2023/GENAP
 
 ## Error Handling
 
-| HTTP Status | Constructor | When |
-|-------------|-------------|------|
-| 400 | `apperror.BadRequest(msg)` | Invalid request (body parse error, missing fields) |
-| 404 | `apperror.NotFound(msg)` | Resource not found (PDF missing, extraction data not found) |
-| 500 | `apperror.Internal(msg, err)` | Infrastructure failure (browser crash, page load error, PDF corrupted) |
+|HTTP Status|Constructor|When|
+|---|---|---|
+|400|`apperror.BadRequest(msg)`|Invalid request (body parse error, missing fields)|
+|401|`apperror.Unauthorized(msg)`|Authentication failure (LMS login failed)|
+|403|`apperror.Forbidden(msg)`|Permission denied (extraction access denied)|
+|404|`apperror.NotFound(msg, err)`|Resource not found (PDF missing, extraction data not found)|
+|500|`apperror.Internal(msg, err)`|Infrastructure failure (browser crash, page load error, PDF corrupted)|
 
 ### Extraction-Specific Errors
 
@@ -1062,6 +1186,10 @@ curl http://localhost:3000/api/v1/lms/khs/data/2211700006/2022/2023/GENAP
 | `SESSION_TTL` | `15m` | Session cache duration before expiry |
 | `MAX_SESSIONS` | `10` | Maximum cached sessions in memory |
 | `EXTRACT_DIR` | `./extracted` | Directory for extracted JSON files |
+| `MAX_BODY_SIZE` | `1MB` | Max HTTP request body size |
+| `CORS_ALLOW_ORIGINS` | `*` | CORS allowed origins |
+| `CORS_ALLOW_METHODS` | `GET,POST,PUT,PATCH,DELETE,OPTIONS` | CORS allowed methods |
+| `CORS_ALLOW_HEADERS` | `Content-Type,Authorization` | CORS allowed headers |
 
 ---
 
