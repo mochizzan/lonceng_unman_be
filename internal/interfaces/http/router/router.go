@@ -17,7 +17,7 @@ func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *han
 	v1.Post("/lms/login", lmsHandler.Login)
 
 	// Documents
-	v1.Get("/lms/krs", docHandler.DownloadKRS)
-	v1.Get("/lms/khs/semesters", docHandler.GetKHSSemesters)
-	v1.Get("/lms/khs", docHandler.DownloadKHS)
+	v1.Post("/lms/krs", docHandler.DownloadKRS)
+	v1.Post("/lms/khs/semesters", docHandler.GetKHSSemesters)
+	v1.Post("/lms/khs", docHandler.DownloadKHS)
 }

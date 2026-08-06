@@ -29,6 +29,9 @@ type AppConfig struct {
 	ActionTimeout   time.Duration
 	// Document Download
 	DownloadDir string
+	// Session Management
+	SessionTTL  time.Duration
+	MaxSessions int
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -56,6 +59,8 @@ func New() (*Config, error) {
 			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 30*time.Second),
 			ActionTimeout:   getEnvDuration("ACTION_TIMEOUT", 10*time.Second),
 			DownloadDir:     getEnv("DOWNLOAD_DIR", "./downloads"),
+			SessionTTL:      getEnvDuration("SESSION_TTL", 15*time.Minute),
+			MaxSessions:     getEnvInt("MAX_SESSIONS", 10),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
@@ -148,4 +153,17 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// getEnvInt reads an integer environment variable.
+func getEnvInt(key string, fallback int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

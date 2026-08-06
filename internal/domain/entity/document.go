@@ -2,6 +2,26 @@ package entity
 
 import "time"
 
+// KRSDownloadRequest represents the input for a KRS PDF download.
+type KRSDownloadRequest struct {
+	NPM      string `json:"npm"`
+	Password string `json:"password"`
+}
+
+// KHSSemestersRequest represents the input for fetching KHS semesters.
+type KHSSemestersRequest struct {
+	NPM      string `json:"npm"`
+	Password string `json:"password"`
+}
+
+// KHSDownloadRequest represents the input for a KHS PDF download.
+type KHSDownloadRequest struct {
+	NPM         string `json:"npm"`
+	Password    string `json:"password"`
+	TahunAjaran string `json:"tahun_ajaran"`
+	Semester    string `json:"semester"`
+}
+
 // KHSSemester represents one semester entry from the KHS list page.
 type KHSSemester struct {
 	TahunAjaran string `json:"tahun_ajaran"` // e.g. "2022/2023"

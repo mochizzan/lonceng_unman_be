@@ -8,6 +8,7 @@ import (
 	"lonceng_unman_be/internal/infrastructure/fibererror"
 	"lonceng_unman_be/internal/infrastructure/logger"
 	"lonceng_unman_be/internal/infrastructure/middleware"
+	"lonceng_unman_be/internal/infrastructure/session"
 	"lonceng_unman_be/internal/interfaces/http/handler"
 	"lonceng_unman_be/internal/interfaces/http/router"
 
@@ -34,16 +35,18 @@ func main() {
 	// Register middleware (recover → requestid → logger → cors)
 	middleware.Register(app, cfg.CORS)
 
+	// Wire session manager (in-memory cache with TTL)
+	sessionMgr := session.NewManager(cfg)
+	defer sessionMgr.CloseAll()
+
 	// Wire application services
 	healthService := service.NewHealthService(cfg.App)
-	lmsService := service.NewLMSService(cfg)
+	lmsService := service.NewLMSService(cfg, sessionMgr)
+	docService := service.NewLMSDocumentService(cfg, sessionMgr)
 
 	// Wire HTTP handlers
 	healthHandler := handler.NewHealthHandler(healthService)
 	lmsHandler := handler.NewLMSHandler(lmsService)
-
-	// Wire document service
-	docService := service.NewLMSDocumentService(cfg)
 	docHandler := handler.NewDocumentHandler(docService)
 
 	// Register routes

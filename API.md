@@ -206,14 +206,23 @@ curl -X POST http://localhost:3000/api/v1/lms/login \
 Download file PDF KRS (Kartu Rencana Studi) untuk mahasiswa tertentu.
 
 ```
-GET /api/v1/lms/krs?npm=xxx
+POST /api/v1/lms/krs
+Content-Type: application/json
 ```
 
-**Query Parameters:**
+**Request Body:**
+
+```json
+{
+  "npm": "2211700006",
+  "password": "izzan027"
+}
+```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `npm` | string | ✅ | NPM (hanya digit, regex: `^[0-9]+$`) |
+| `password` | string | ✅ | Password LMS |
 
 **Response 200 OK:**
 
@@ -274,7 +283,9 @@ GET /api/v1/lms/krs?npm=xxx
 **Contoh curl:**
 
 ```bash
-curl "http://localhost:3000/api/v1/lms/krs?npm=2211700006"
+curl -X POST http://localhost:3000/api/v1/lms/krs \
+  -H "Content-Type: application/json" \
+  -d '{"npm":"2211700006","password":"izzan027"}'
 ```
 
 **Lokasi File Tersimpan:**
@@ -292,14 +303,23 @@ downloads/2211700006/krs/semester_8.pdf
 Mendapatkan daftar semester yang tersedia untuk KHS (Kartu Hasil Studi) mahasiswa tertentu.
 
 ```
-GET /api/v1/lms/khs/semesters?npm=xxx
+POST /api/v1/lms/khs/semesters
+Content-Type: application/json
 ```
 
-**Query Parameters:**
+**Request Body:**
+
+```json
+{
+  "npm": "2211700006",
+  "password": "izzan027"
+}
+```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `npm` | string | ✅ | NPM (hanya digit, regex: `^[0-9]+$`) |
+| `password` | string | ✅ | Password LMS |
 
 **Response 200 OK:**
 
@@ -363,7 +383,9 @@ GET /api/v1/lms/khs/semesters?npm=xxx
 **Contoh curl:**
 
 ```bash
-curl "http://localhost:3000/api/v1/lms/khs/semesters?npm=2211700006"
+curl -X POST http://localhost:3000/api/v1/lms/khs/semesters \
+  -H "Content-Type: application/json" \
+  -d '{"npm":"2211700006","password":"izzan027"}'
 ```
 
 ---
@@ -373,14 +395,25 @@ curl "http://localhost:3000/api/v1/lms/khs/semesters?npm=2211700006"
 Download file PDF KHS (Kartu Hasil Studi) untuk semester tertentu.
 
 ```
-GET /api/v1/lms/khs?npm=xxx&tahun_ajaran=xxx&semester=xxx
+POST /api/v1/lms/khs
+Content-Type: application/json
 ```
 
-**Query Parameters:**
+**Request Body:**
+
+```json
+{
+  "npm": "2211700006",
+  "password": "izzan027",
+  "tahun_ajaran": "2022/2023",
+  "semester": "GANJIL"
+}
+```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `npm` | string | ✅ | NPM (hanya digit, regex: `^[0-9]+$`) |
+| `password` | string | ✅ | Password LMS |
 | `tahun_ajaran` | string | ✅ | Tahun ajaran (format: `YYYY/YYYY`, contoh: `2022/2023`) |
 | `semester` | string | ✅ | Semester (`GANJIL` atau `GENAP`, case-sensitive) |
 
@@ -419,7 +452,7 @@ GET /api/v1/lms/khs?npm=xxx&tahun_ajaran=xxx&semester=xxx
 ```json
 {
   "status": "error",
-  "message": "npm query parameter is required",
+  "message": "npm is required",
   "trace_id": "abc123..."
 }
 ```
@@ -427,7 +460,7 @@ GET /api/v1/lms/khs?npm=xxx&tahun_ajaran=xxx&semester=xxx
 ```json
 {
   "status": "error",
-  "message": "tahun_ajaran query parameter is required",
+  "message": "password is required",
   "trace_id": "abc123..."
 }
 ```
@@ -435,7 +468,15 @@ GET /api/v1/lms/khs?npm=xxx&tahun_ajaran=xxx&semester=xxx
 ```json
 {
   "status": "error",
-  "message": "semester query parameter is required",
+  "message": "tahun_ajaran is required",
+  "trace_id": "abc123..."
+}
+```
+
+```json
+{
+  "status": "error",
+  "message": "semester is required",
   "trace_id": "abc123..."
 }
 ```
@@ -473,7 +514,9 @@ GET /api/v1/lms/khs?npm=xxx&tahun_ajaran=xxx&semester=xxx
 **Contoh curl:**
 
 ```bash
-curl "http://localhost:3000/api/v1/lms/khs?npm=2211700006&tahun_ajaran=2022/2023&semester=GANJIL"
+curl -X POST http://localhost:3000/api/v1/lms/khs \
+  -H "Content-Type: application/json" \
+  -d '{"npm":"2211700006","password":"izzan027","tahun_ajaran":"2022/2023","semester":"GANJIL"}'
 ```
 
 **Lokasi File Tersimpan:**
@@ -569,6 +612,8 @@ Race: .wrapper (success) vs .alert-danger (failure)
 | `BROWSER_TIMEOUT` | `30s` | Timeout keseluruhan operasi browser |
 | `ACTION_TIMEOUT` | `10s` | Timeout per aksi (click, fill, dll) |
 | `DOWNLOAD_DIR` | `./downloads` | Direktori penyimpanan file download |
+| `SESSION_TTL` | `15m` | Durasi session cache sebelum expired |
+| `MAX_SESSIONS` | `10` | Maksimal session yang di-cache di memory |
 
 ---
 
