@@ -248,6 +248,156 @@ func ExtractTableRows(rows []PDFRow, startPattern string) [][]string {
 	return tableRows
 }
 
+// ColumnBoundary represents a column's X range for position-based extraction.
+type ColumnBoundary struct {
+	Name  string
+	Start float64
+	End   float64
+}
+
+// FindColumnPositions identifies column X boundaries from a header row.
+// It takes the header PDFRow and a list of column header names (in order).
+// Strategy:
+//  1. Group header characters by X position to find distinct column X values.
+//  2. Match column names to these X groups by checking if the joined text
+//     starts with the column name (handles "MataKuliah" matching "Mata Kuliah").
+//  3. If matching fails, use the X groups directly in order.
+//  4. Column boundaries are midpoints between adjacent X positions.
+func FindColumnPositions(headerRow PDFRow, columnNames []string) []ColumnBoundary {
+	if len(columnNames) == 0 || len(headerRow.Words) == 0 {
+		return nil
+	}
+
+	// Step 1: Group header words by X position (using roundX tolerance)
+	type xGroup struct {
+		x     float64
+		texts []string
+	}
+	var groups []xGroup
+	var lastX float64
+	var currentGroup *xGroup
+
+	for _, w := range headerRow.Words {
+		xKey := roundX(w.X)
+		if currentGroup == nil || abs(xKey-lastX) > 0.5 {
+			groups = append(groups, xGroup{x: xKey})
+			currentGroup = &groups[len(groups)-1]
+			lastX = xKey
+		}
+		currentGroup.texts = append(currentGroup.texts, w.Text)
+	}
+
+	if len(groups) == 0 {
+		return nil
+	}
+
+	// Step 2: Match column names to X groups
+	// For each column name, find the X group whose joined text starts with it
+	// (case-insensitive). This handles "MataKuliah" matching "Mata Kuliah".
+	var columnXPositions []float64
+	usedGroups := make(map[int]bool)
+
+	for _, name := range columnNames {
+		nameLower := strings.ToLower(name)
+		nameParts := strings.Fields(nameLower)
+		found := false
+
+		for gi, g := range groups {
+			if usedGroups[gi] {
+				continue
+			}
+			gText := strings.ToLower(strings.Join(g.texts, ""))
+
+			// Check if the group text starts with the column name
+			// Also handle case where column name parts are embedded:
+			// "Mata Kuliah" should match "MataKuliah" (joined) or "Mata" + "Kuliah" (split)
+			if strings.HasPrefix(gText, nameLower) ||
+				strings.HasPrefix(gText, strings.Join(nameParts, "")) {
+				columnXPositions = append(columnXPositions, g.x)
+				usedGroups[gi] = true
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			// Fallback: use the Nth X group (column name order matches header order)
+			if len(columnXPositions) < len(groups) {
+				columnXPositions = append(columnXPositions, groups[len(columnXPositions)].x)
+			} else {
+				// Not enough groups; use last known X + estimated spacing
+				lastX := columnXPositions[len(columnXPositions)-1]
+				columnXPositions = append(columnXPositions, lastX+50)
+			}
+		}
+	}
+
+	// Step 3: Build boundaries using midpoints between adjacent X positions
+	boundaries := make([]ColumnBoundary, len(columnNames))
+	for i, name := range columnNames {
+		start := columnXPositions[i]
+		var end float64
+		if i+1 < len(columnXPositions) {
+			end = (columnXPositions[i] + columnXPositions[i+1]) / 2.0
+		} else {
+			// Last column extends to the right edge
+			end = columnXPositions[i] + 500
+		}
+		boundaries[i] = ColumnBoundary{Name: name, Start: start, End: end}
+	}
+
+	return boundaries
+}
+
+// ExtractColumnsFromRow extracts text from a PDFRow using column boundaries.
+// Returns a map of column name to the reconstructed text of words within that column's X range.
+// Characters at the same X position (within tolerance) are joined without spaces,
+// matching how RowToLine reconstructs words from individual characters.
+func ExtractColumnsFromRow(row PDFRow, boundaries []ColumnBoundary) map[string]string {
+	result := make(map[string]string)
+	for _, col := range boundaries {
+		// Collect words in this column's X range
+		var colWords []PDFWord
+		for _, w := range row.Words {
+			if w.X >= col.Start && w.X < col.End {
+				colWords = append(colWords, w)
+			}
+		}
+
+		if len(colWords) == 0 {
+			result[col.Name] = ""
+			continue
+		}
+
+		// Group words by X position (same logic as RowToLine)
+		type xGroup struct {
+			x     float64
+			texts []string
+		}
+		var groups []xGroup
+		var lastX float64
+		var currentGroup *xGroup
+
+		for _, w := range colWords {
+			xKey := roundX(w.X)
+			if currentGroup == nil || abs(xKey-lastX) > 0.5 {
+				groups = append(groups, xGroup{x: xKey})
+				currentGroup = &groups[len(groups)-1]
+				lastX = xKey
+			}
+			currentGroup.texts = append(currentGroup.texts, w.Text)
+		}
+
+		// Join each group without spaces, separate groups with spaces
+		var parts []string
+		for _, g := range groups {
+			parts = append(parts, strings.Join(g.texts, ""))
+		}
+		result[col.Name] = strings.Join(parts, " ")
+	}
+	return result
+}
+
 // parseIntSafe safely parses an integer string.
 func parseIntSafe(s string) int {
 	s = strings.TrimSpace(s)

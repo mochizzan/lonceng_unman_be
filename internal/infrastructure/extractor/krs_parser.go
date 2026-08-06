@@ -193,43 +193,47 @@ func FindNextValueLine(lines []string, startIdx int) string {
 	return ""
 }
 
+// krsColumnNames defines the expected column headers for KRS table extraction.
+var krsColumnNames = []string{"No", "Kode", "Mata Kuliah", "SKS", "KELAS", "DOSEN", "JADWAL"}
+
 // parseKRSMataKuliah extracts course table from KRS.
+// Uses column-position-based extraction: identifies column boundaries from the header row,
+// then scans ALL rows for course data (not dependent on row order).
+// This correctly handles PDFs where the library returns individual characters
+// and where rows may be in non-standard order (e.g., bottom-to-top).
 func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtraction) {
-	// Find table start marker
-	tableStart := -1
-	for i, line := range lines {
+	// Find the header row to identify column boundaries
+	var headerRow *PDFRow
+	for i, row := range rows {
+		line := RowToLine(row)
 		normalized := NormalizeLabel(line)
 		if strings.Contains(normalized, "Kode") && strings.Contains(normalized, "Mata Kuliah") {
-			tableStart = i + 1
+			headerRow = &rows[i]
 			break
 		}
 	}
 
-	if tableStart == -1 {
+	if headerRow == nil {
 		return
 	}
 
-	// Find table end (look for "Total" or empty rows)
-	tableEnd := len(lines)
-	for i := tableStart; i < len(lines); i++ {
-		if strings.Contains(lines[i], "Total") || strings.Contains(lines[i], "Jumlah") {
-			tableEnd = i
-			break
-		}
+	// Identify column X boundaries from the header row
+	boundaries := FindColumnPositions(*headerRow, krsColumnNames)
+	if boundaries == nil {
+		return
 	}
 
-	// Parse table rows
+	// Scan ALL rows for course data (not dependent on row order).
+	// A row is a course row if it has a valid Kode (alphanumeric course code).
 	var courses []entity.KRSMataKuliah
 	courseNo := 1
+	seenKodes := make(map[string]bool) // deduplicate courses
 
-	for i := tableStart; i < tableEnd && i < len(rows); i++ {
-		row := rows[i]
-		if len(row.Words) < 5 {
-			continue // skip non-table rows
+	for i, row := range rows {
+		if len(row.Words) == 0 {
+			continue
 		}
 
-		// Try to identify columns by position
-		// Typical KRS table: No | Kode | Nama | SKS | Kelas | Dosen | Jadwal
 		line := RowToLine(row)
 
 		// Skip header-like rows
@@ -237,53 +241,68 @@ func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtract
 			continue
 		}
 
-		// Parse course data
+		// Skip non-data rows
+		if len(row.Words) < 3 {
+			continue
+		}
+
+		// Skip Total/Jumlah rows
+		if strings.Contains(line, "Total") || strings.Contains(line, "Jumlah") {
+			continue
+		}
+
+		// Extract text for each column using X-position boundaries
+		cols := ExtractColumnsFromRow(row, boundaries)
+
+		// Skip rows where Kode is empty or too short (not a course row)
+		kode := strings.TrimSpace(cols["Kode"])
+		if kode == "" || len(kode) < 3 {
+			continue
+		}
+
+		// Skip non-alphanumeric course codes (must contain at least one digit)
+		hasDigit := false
+		for _, r := range kode {
+			if r >= '0' && r <= '9' {
+				hasDigit = true
+				break
+			}
+		}
+		if !hasDigit {
+			continue
+		}
+
+		// Deduplicate (same code + class = same course)
+		kelas := strings.TrimSpace(cols["KELAS"])
+		key := kode + ":" + kelas
+		if seenKodes[key] {
+			continue
+		}
+		seenKodes[key] = true
+
+		// Parse SKS (must be a valid integer)
+		sks := parseIntSafe(cols["SKS"])
+
 		course := entity.KRSMataKuliah{
-			No: courseNo,
+			No:    courseNo,
+			Kode:  kode,
+			Nama:  strings.TrimSpace(cols["Mata Kuliah"]),
+			SKS:   sks,
+			Kelas: kelas,
+			Dosen: strings.TrimSpace(cols["DOSEN"]),
 		}
 
-		// Extract fields based on position patterns
-		words := row.Words
-		if len(words) >= 6 {
-			course.Kode = words[1].Text
-			course.Nama = words[2].Text
-
-			// Try to parse SKS
-			for j := 3; j < len(words); j++ {
-				if sks := parseIntSafe(words[j].Text); sks > 0 && sks <= MaxSKS {
-					course.SKS = sks
-					break
-				}
-			}
-
-			// Get class and dosen from remaining words
-			if len(words) > 4 {
-				course.Kelas = words[4].Text
-			}
-			if len(words) > 5 {
-				dosenParts := make([]string, len(words)-5)
-				for k, w := range words[5:] {
-					dosenParts[k] = w.Text
-				}
-				course.Dosen = strings.Join(dosenParts, " ")
-			}
+		// Extract schedule from the Jadwal column
+		jadwalText := strings.TrimSpace(cols["JADWAL"])
+		if jadwalText != "" {
+			course.Jadwal = parseJadwal(jadwalText)
+		} else {
+			// Search nearby rows for schedule (day + time might be on separate rows)
+			course.Jadwal = findScheduleNearRow(rows, i, boundaries)
 		}
 
-		// Extract schedule from next row if available
-		if i+1 < len(rows) {
-			nextLine := RowToLine(rows[i+1])
-			if strings.Contains(nextLine, "Sabtu") || strings.Contains(nextLine, "Senin") ||
-				strings.Contains(nextLine, "Selasa") || strings.Contains(nextLine, "Rabu") ||
-				strings.Contains(nextLine, "Kamis") || strings.Contains(nextLine, "Jumat") {
-				course.Jadwal = parseJadwal(nextLine)
-				i++ // skip schedule row
-			}
-		}
-
-		if course.Kode != "" {
-			courses = append(courses, course)
-			courseNo++
-		}
+		courses = append(courses, course)
+		courseNo++
 	}
 
 	result.KRS.MataKuliah = courses
@@ -294,6 +313,65 @@ func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtract
 		total += c.SKS
 	}
 	result.KRS.TotalSKS = total
+}
+
+// findScheduleNearRow searches rows near the given index for schedule information.
+// Schedule data might be split across multiple rows (day on one row, time on another).
+func findScheduleNearRow(rows []PDFRow, courseIdx int, boundaries []ColumnBoundary) entity.KRSJadwal {
+	// Search in a window of ±3 rows around the course row
+	start := courseIdx - 3
+	if start < 0 {
+		start = 0
+	}
+	end := courseIdx + 4
+	if end > len(rows) {
+		end = len(rows)
+	}
+
+	var dayLine string
+	var timeLine string
+
+	for i := start; i < end; i++ {
+		if i == courseIdx {
+			continue
+		}
+		line := RowToLine(rows[i])
+		if isIndonesianDay(line) {
+			dayLine = line
+		}
+		// Check for time pattern HH:MM
+		if strings.Contains(line, ":") && len(line) >= 5 {
+			for _, part := range strings.Fields(line) {
+				if isValidTime(part) {
+					timeLine = line
+					break
+				}
+			}
+		}
+	}
+
+	if dayLine != "" || timeLine != "" {
+		combined := dayLine
+		if timeLine != "" {
+			if combined != "" {
+				combined += " "
+			}
+			combined += timeLine
+		}
+		return parseJadwal(combined)
+	}
+
+	return entity.KRSJadwal{}
+}
+
+// isIndonesianDay checks if a line contains an Indonesian day name.
+func isIndonesianDay(line string) bool {
+	for _, day := range indonesianDays {
+		if strings.Contains(line, day) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseJadwal extracts schedule info from a line.

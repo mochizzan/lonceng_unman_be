@@ -93,39 +93,46 @@ func parsePlainTextHeaderKHS(text string, result *entity.KHSExtraction) {
 	}
 }
 
+// khsColumnNames defines the expected column headers for KHS table extraction.
+// KHS table: No | Kode | Mata Kuliah | Dosen | SKS | Nilai | Mutu
+var khsColumnNames = []string{"No", "Kode", "Mata Kuliah", "Dosen", "SKS", "Nilai", "Mutu"}
+
 // parseKHSMataKuliah extracts course table from KHS.
+// Uses column-position-based extraction: identifies column boundaries from the header row,
+// then scans ALL rows for course data (not dependent on row order).
+// This correctly handles PDFs where the library returns individual characters
+// and where rows may be in non-standard order (e.g., bottom-to-top).
 func parseKHSMataKuliah(rows []PDFRow, lines []string, result *entity.KHSExtraction) {
-	// Find table start marker
-	tableStart := -1
-	for i, line := range lines {
+	// Find the header row to identify column boundaries
+	var headerRow *PDFRow
+	for i, row := range rows {
+		line := RowToLine(row)
 		normalized := NormalizeLabel(line)
 		if strings.Contains(normalized, "Kode") && strings.Contains(normalized, "Mata Kuliah") {
-			tableStart = i + 1
+			headerRow = &rows[i]
 			break
 		}
 	}
 
-	if tableStart == -1 {
+	if headerRow == nil {
 		return
 	}
 
-	// Find table end (look for "Rekapitulasi" or "Total")
-	tableEnd := len(lines)
-	for i := tableStart; i < len(lines); i++ {
-		if strings.Contains(lines[i], "Rekapitulasi") || strings.Contains(lines[i], "Total") {
-			tableEnd = i
-			break
-		}
+	// Identify column X boundaries from the header row
+	boundaries := FindColumnPositions(*headerRow, khsColumnNames)
+	if boundaries == nil {
+		return
 	}
 
-	// Parse table rows
+	// Scan ALL rows for course data (not dependent on row order).
+	// A row is a course row if it has a valid Kode (alphanumeric course code).
 	var courses []entity.KHSMataKuliah
 	courseNo := 1
+	seenKodes := make(map[string]bool) // deduplicate courses
 
-	for i := tableStart; i < tableEnd && i < len(rows); i++ {
-		row := rows[i]
-		if len(row.Words) < 5 {
-			continue // skip non-table rows
+	for _, row := range rows {
+		if len(row.Words) == 0 {
+			continue
 		}
 
 		line := RowToLine(row)
@@ -135,51 +142,63 @@ func parseKHSMataKuliah(rows []PDFRow, lines []string, result *entity.KHSExtract
 			continue
 		}
 
-		// Parse course data
+		// Skip non-data rows
+		if len(row.Words) < 3 {
+			continue
+		}
+
+		// Skip Rekapitulasi/Total rows
+		if strings.Contains(line, "Rekapitulasi") || strings.Contains(line, "Total") {
+			continue
+		}
+
+		// Extract text for each column using X-position boundaries
+		cols := ExtractColumnsFromRow(row, boundaries)
+
+		// Skip rows where Kode is empty or too short (not a course row)
+		kode := strings.TrimSpace(cols["Kode"])
+		if kode == "" || len(kode) < 3 {
+			continue
+		}
+
+		// Skip non-alphanumeric course codes (must contain at least one digit)
+		hasDigit := false
+		for _, r := range kode {
+			if r >= '0' && r <= '9' {
+				hasDigit = true
+				break
+			}
+		}
+		if !hasDigit {
+			continue
+		}
+
+		// Deduplicate
+		if seenKodes[kode] {
+			continue
+		}
+		seenKodes[kode] = true
+
+		// Parse SKS and Nilai
+		sks := parseIntSafe(cols["SKS"])
+		nilai := strings.TrimSpace(cols["Nilai"])
+		if nilai != "" {
+			nilai = strings.ToUpper(nilai)
+		}
+		mutu := parseIntSafe(cols["Mutu"])
+
 		course := entity.KHSMataKuliah{
-			No: courseNo,
+			No:    courseNo,
+			Kode:  kode,
+			Nama:  strings.TrimSpace(cols["Mata Kuliah"]),
+			Dosen: strings.TrimSpace(cols["Dosen"]),
+			SKS:   sks,
+			Nilai: nilai,
+			Mutu:  mutu,
 		}
 
-		words := row.Words
-		if len(words) >= 6 {
-			course.Kode = words[1].Text
-			course.Nama = words[2].Text
-
-			// Try to find nilai (grade) and mutu
-			for j := 3; j < len(words); j++ {
-				nilai := strings.ToUpper(words[j].Text)
-				if nilai == "A" || nilai == "B" || nilai == "C" || nilai == "D" || nilai == "E" {
-					course.Nilai = nilai
-					// Mutu is usually next to nilai
-					if j+1 < len(words) {
-						course.Mutu = parseIntSafe(words[j+1].Text)
-					}
-					break
-				}
-			}
-
-			// Get dosen and SKS
-			for j := 3; j < len(words); j++ {
-				if sks := parseIntSafe(words[j].Text); sks > 0 && sks <= MaxSKSKHS {
-					course.SKS = sks
-					break
-				}
-			}
-
-			// Get dosen from remaining words
-			if len(words) > 5 {
-				parts := make([]string, 0, len(words)-3)
-				for _, w := range words[3:] {
-					parts = append(parts, w.Text)
-				}
-				course.Dosen = strings.Join(parts, " ")
-			}
-		}
-
-		if course.Kode != "" {
-			courses = append(courses, course)
-			courseNo++
-		}
+		courses = append(courses, course)
+		courseNo++
 	}
 
 	result.KHS.MataKuliah = courses
