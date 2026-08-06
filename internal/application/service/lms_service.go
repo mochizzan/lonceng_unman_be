@@ -59,7 +59,7 @@ func NewLMSDocumentService(cfg *config.Config, sessions port.SessionManager) LMS
 // Login validates credentials by creating a session. The session is cached
 // for subsequent requests. Returns success/failure as business outcomes.
 func (s *lmsService) Login(req entity.LoginRequest) (*entity.LoginResult, error) {
-	_, err := s.sessions.GetOrCreate(req.NPM, req.Password)
+	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
 		slog.Info("login failed", "npm", req.NPM, "err", err)
 		return &entity.LoginResult{
@@ -69,6 +69,7 @@ func (s *lmsService) Login(req entity.LoginRequest) (*entity.LoginResult, error)
 			Timestamp: time.Now(),
 		}, nil
 	}
+	defer session.Close()
 
 	slog.Info("login successful", "npm", req.NPM)
 	return &entity.LoginResult{
@@ -86,6 +87,7 @@ func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
+	defer session.Close()
 
 	// Navigate to KRS page to extract semester number.
 	krsPageURL := s.cfg.App.LMSBaseURL + browserInfra.KRSPagePath
@@ -131,6 +133,7 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
+	defer session.Close()
 
 	// Navigate to KHS list page.
 	khsListURL := s.cfg.App.LMSBaseURL + browserInfra.KHSListPath
@@ -187,10 +190,17 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 
 // DownloadKHS downloads the KHS PDF for a specific semester.
 func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity.KHSDownloadResult, error) {
+	// Validate semester format.
+	req.Semester = strings.ToUpper(req.Semester)
+	if req.Semester != "GANJIL" && req.Semester != "GENAP" {
+		return nil, fmt.Errorf("semester must be GANJIL or GENAP")
+	}
+
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
+	defer session.Close()
 
 	// Navigate to KHS detail page.
 	detailURL := fmt.Sprintf("%s%s&tahun_ajaran=%s&semester=%s",
