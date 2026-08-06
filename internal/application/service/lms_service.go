@@ -221,7 +221,7 @@ func (s *lmsDocumentService) DownloadKRS(npm string) (*entity.KRSDownloadResult,
 	savePath := filepath.Join(s.lmsService.cfg.App.DownloadDir, npm, "krs", "krs.pdf")
 
 	// Download and save
-	filename, size, err := browserInfra.DownloadAndSave(page, krsURL, savePath, s.lmsService.cfg.App.BrowserTimeout)
+	filename, size, err := browserInfra.DownloadAndSave(page, krsURL, savePath)
 	if err != nil {
 		return nil, fmt.Errorf("download KRS PDF: %w", err)
 	}
@@ -340,7 +340,7 @@ func (s *lmsDocumentService) DownloadKHS(npm, tahunAjaran, semester string) (*en
 	// Step 3: Build canonical save path and download
 	savePath := browserInfra.BuildKHSPath(s.lmsService.cfg.App.DownloadDir, npm, tahunAjaran, semester)
 
-	filename, size, err := browserInfra.DownloadAndSave(page, pdfURL, savePath, s.lmsService.cfg.App.BrowserTimeout)
+	filename, size, err := browserInfra.DownloadAndSave(page, pdfURL, savePath)
 	if err != nil {
 		return nil, fmt.Errorf("download KHS PDF: %w", err)
 	}

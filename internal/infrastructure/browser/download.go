@@ -6,43 +6,37 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/go-rod/rod"
 )
 
-// DownloadAndSave downloads a PDF from the given URL using JavaScript fetch(),
+// DownloadAndSave downloads a PDF from the given URL using JavaScript XMLHttpRequest,
 // bypassing Chromium's PDF download behavior. Saves to savePath.
 // Returns the filename, byte count, and any error.
-func DownloadAndSave(page *rod.Page, url string, savePath string, timeout time.Duration) (string, int, error) {
+func DownloadAndSave(page *rod.Page, url string, savePath string) (string, int, error) {
 	dir := filepath.Dir(savePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", 0, fmt.Errorf("create save dir: %w", err)
 	}
 
-	// Use JavaScript fetch() to download the PDF content.
+	// Use synchronous XMLHttpRequest to download the PDF content.
 	// This avoids Chromium's net::ERR_ABORTED when navigating to PDF URLs.
-	jsCode := fmt.Sprintf(`
-		(async () => {
-			const response = await fetch("%s", {
-				credentials: 'include'
-			});
-			if (!response.ok) {
-				throw new Error("HTTP " + response.status + " " + response.statusText);
-			}
-			const contentType = response.headers.get("content-type");
-			if (!contentType || !contentType.includes("application/pdf")) {
-				throw new Error("Expected PDF but got: " + contentType);
-			}
-			const buffer = await response.arrayBuffer();
-			const bytes = new Uint8Array(buffer);
-			let binary = "";
-			for (let i = 0; i < bytes.byteLength; i++) {
-				binary += String.fromCharCode(bytes[i]);
-			}
-			return btoa(binary);
-		})()
-	`, url)
+	jsCode := `(function() {
+		var xhr = new XMLHttpRequest();
+		xhr.open("GET", "` + url + `", false);
+		xhr.withCredentials = true;
+		xhr.responseType = "arraybuffer";
+		xhr.send();
+		if (xhr.status !== 200) {
+			throw new Error("HTTP " + xhr.status + " " + xhr.statusText);
+		}
+		var bytes = new Uint8Array(xhr.response);
+		var binary = "";
+		for (var i = 0; i < bytes.byteLength; i++) {
+			binary += String.fromCharCode(bytes[i]);
+		}
+		return btoa(binary);
+	})()`
 
 	result, err := page.Eval(jsCode)
 	if err != nil {
