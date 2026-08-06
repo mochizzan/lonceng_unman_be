@@ -1,19 +1,16 @@
 package browser
 
 import (
-	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
 )
 
-// DownloadAndSave downloads a PDF from the given URL using async JavaScript fetch(),
+// DownloadAndSave downloads a PDF from the given URL using JavaScript fetch(),
 // bypassing Chromium's PDF download behavior. Saves to savePath.
 // Returns the filename, byte count, and any error.
 func DownloadAndSave(page *rod.Page, url string, savePath string) (string, int, error) {
@@ -22,56 +19,35 @@ func DownloadAndSave(page *rod.Page, url string, savePath string) (string, int, 
 		return "", 0, fmt.Errorf("create save dir: %w", err)
 	}
 
-	// Use async fetch() via CDP Runtime.evaluate with awaitPromise.
-	// This avoids Chromium's net::ERR_ABORTED when navigating to PDF URLs.
-	jsCode := fmt.Sprintf(`
-		(async function() {
-			const response = await fetch("%s", { credentials: "include" });
-			if (!response.ok) {
-				throw new Error("HTTP " + response.status + " " + response.statusText);
-			}
-			const contentType = response.headers.get("content-type");
-			if (!contentType || !contentType.includes("application/pdf")) {
-				throw new Error("Expected PDF but got: " + contentType);
-			}
-			const buffer = await response.arrayBuffer();
-			const bytes = new Uint8Array(buffer);
-			let binary = "";
-			for (let i = 0; i < bytes.byteLength; i++) {
-				binary += String.fromCharCode(bytes[i]);
-			}
-			return btoa(binary);
-		})()
-	`, url)
+	// Use async fetch() to download the PDF content.
+	// go-rod's Eval wraps the code in: function() { return (CODE).apply(this, arguments) }
+	// So we pass an async function expression directly — NOT an IIFE.
+	// The wrapper calls it with .apply(), and Eval's AwaitPromise waits for the result.
+	jsCode := fmt.Sprintf(`async function() {
+		const response = await fetch("%s", { credentials: "include" });
+		if (!response.ok) {
+			throw new Error("HTTP " + response.status + " " + response.statusText);
+		}
+		const contentType = response.headers.get("content-type");
+		if (!contentType || !contentType.includes("application/pdf")) {
+			throw new Error("Expected PDF but got: " + contentType);
+		}
+		const buffer = await response.arrayBuffer();
+		const bytes = new Uint8Array(buffer);
+		let binary = "";
+		for (let i = 0; i < bytes.byteLength; i++) {
+			binary += String.fromCharCode(bytes[i]);
+		}
+		return btoa(binary);
+	}`, url)
 
-	// Use CDP directly to evaluate async JS with awaitPromise.
-	params := proto.RuntimeEvaluate{
-		Expression:    jsCode,
-		AwaitPromise:  true,
-		ReturnByValue: true,
-	}
-	res, err := page.Call(context.Background(), "", "Runtime.evaluate", params)
+	result, err := page.Eval(jsCode)
 	if err != nil {
 		return "", 0, fmt.Errorf("fetch PDF via JS: %w", err)
 	}
 
-	// Parse the result to get the value.
-	var result struct {
-		Result struct {
-			Type  string `json:"type"`
-			Value string `json:"value"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(res, &result); err != nil {
-		return "", 0, fmt.Errorf("parse JS result: %w", err)
-	}
-
-	if result.Result.Type == "undefined" || result.Result.Value == "" {
-		return "", 0, fmt.Errorf("fetch PDF via JS: no value returned")
-	}
-
 	// Decode base64 to bytes.
-	pdfBody, err := base64.StdEncoding.DecodeString(result.Result.Value)
+	pdfBody, err := base64.StdEncoding.DecodeString(result.Value.Str())
 	if err != nil {
 		return "", 0, fmt.Errorf("decode PDF body: %w", err)
 	}
