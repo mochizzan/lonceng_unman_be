@@ -355,7 +355,7 @@ func parseKRSPenerbitan(lines []string, result *entity.KRSExtraction) {
 }
 
 // parseKRSPersetujuan extracts approval section from KRS.
-// PDF layout:
+// PDF layout (each label on its own row):
 //
 //	Mahasiswa
 //	MOCHAMAD IZZAN FIRASYANSYAH
@@ -365,8 +365,10 @@ func parseKRSPenerbitan(lines []string, result *entity.KRSExtraction) {
 func parseKRSPersetujuan(lines []string, result *entity.KRSExtraction) {
 	for i, line := range lines {
 		normalized := NormalizeLabel(line)
+		trimmed := strings.TrimSpace(line)
 
-		// Extract mahasiswa name: KRS-specific combined line detection
+		// Extract mahasiswa name
+		// Case 1: Combined line "Mahasiswa Ketua Prgram Studi..." (old PDF format)
 		if strings.Contains(line, "Mahasiswa") && strings.Contains(line, "Ketua") {
 			if i+1 < len(lines) {
 				nextLine := strings.TrimSpace(lines[i+1])
@@ -375,21 +377,41 @@ func parseKRSPersetujuan(lines []string, result *entity.KRSExtraction) {
 					result.KRS.Persetujuan.Mahasiswa.Nama = nextLine
 				}
 			}
+			continue
+		}
+		// Case 2: "Mahasiswa" on its own line (new PDF format)
+		if normalized == "mahasiswa" {
+			if i+1 < len(lines) {
+				nextLine := strings.TrimSpace(lines[i+1])
+				nextLine = extractNameBeforeDots(nextLine)
+				if nextLine != "" {
+					result.KRS.Persetujuan.Mahasiswa.Nama = nextLine
+				}
+			}
+			continue
 		}
 
-		// Extract ketua prodi jabatan and nama using shared helper
+		// Extract ketua program studi jabatan
 		if strings.Contains(normalized, "Ketua Program Studi") ||
 			strings.Contains(normalized, "Ketua Prgram Studi") {
 			result.KRS.Persetujuan.KetuaProgramStudi.Jabatan = line
-			name := extractNextNonEmptyAfterLabel(lines, i, func(s string) bool {
-				return true
-			})
+			continue
+		}
+
+		// Extract ketua program studi name (skip dots and NIDN lines)
+		if result.KRS.Persetujuan.KetuaProgramStudi.Jabatan != "" &&
+			result.KRS.Persetujuan.KetuaProgramStudi.Nama == nil {
+			// Skip empty lines, dots-only lines, and NIDN lines
+			if trimmed == "" || isDotsOnly(trimmed) || strings.Contains(line, "NIDN") {
+				continue
+			}
+			name := extractNameBeforeDots(trimmed)
 			if name != "" {
 				result.KRS.Persetujuan.KetuaProgramStudi.Nama = &name
 			}
 		}
 
-		// Extract NIDN
+		// Extract NIDN (only if it has an actual value after the dots)
 		if strings.Contains(line, "NIDN") {
 			nidn := strings.TrimSpace(strings.ReplaceAll(line, "NIDN", ""))
 			nidn = strings.TrimLeft(nidn, ".")
@@ -399,4 +421,15 @@ func parseKRSPersetujuan(lines []string, result *entity.KRSExtraction) {
 			}
 		}
 	}
+}
+
+// isDotsOnly checks if a string contains only dots and whitespace.
+// Used to identify signature placeholder lines in PDF.
+func isDotsOnly(s string) bool {
+	for _, r := range s {
+		if r != '.' && r != ' ' && r != '\t' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
