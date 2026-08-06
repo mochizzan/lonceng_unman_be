@@ -2,6 +2,8 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -53,8 +55,8 @@ func (h *ExtractionHandler) ExtractKRS(c fiber.Ctx) error {
 	}
 
 	// Validate required fields
-	if req.NPM == "" {
-		return apperror.BadRequest("npm is required")
+	if err := validateNPM(req.NPM); err != nil {
+		return err
 	}
 	if req.Password == "" {
 		return apperror.BadRequest("password is required")
@@ -62,7 +64,7 @@ func (h *ExtractionHandler) ExtractKRS(c fiber.Ctx) error {
 
 	result, err := h.extractionSvc.ExtractKRS(req.NPM, req.Password)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no krs pdf") {
+		if errors.Is(err, apperror.ErrPDFNotFound) {
 			return apperror.NotFound("KRS PDF not found for npm: "+req.NPM, err)
 		}
 		return apperror.Internal("KRS extraction failed", err)
@@ -87,8 +89,8 @@ func (h *ExtractionHandler) ExtractKHS(c fiber.Ctx) error {
 	}
 
 	// Validate required fields
-	if req.NPM == "" {
-		return apperror.BadRequest("npm is required")
+	if err := validateNPM(req.NPM); err != nil {
+		return err
 	}
 	if req.Password == "" {
 		return apperror.BadRequest("password is required")
@@ -102,7 +104,7 @@ func (h *ExtractionHandler) ExtractKHS(c fiber.Ctx) error {
 
 	result, err := h.extractionSvc.ExtractKHS(req.NPM, req.Password, req.TahunAjaran, req.Semester)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "khs pdf not found") {
+		if errors.Is(err, apperror.ErrPDFNotFound) {
 			return apperror.NotFound("KHS PDF not found", err)
 		}
 		return apperror.Internal("KHS extraction failed", err)
@@ -121,18 +123,19 @@ func (h *ExtractionHandler) ExtractKHS(c fiber.Ctx) error {
 // GetKRS handles GET /api/v1/lms/krs/data/:npm
 func (h *ExtractionHandler) GetKRS(c fiber.Ctx) error {
 	npm := c.Params("npm")
-	if npm == "" {
-		return apperror.BadRequest("npm parameter is required")
-	}
-
-	// Validate NPM format (digits only)
-	if !isValidNPM(npm) {
-		return apperror.BadRequest("npm must contain only digits")
+	if err := validateNPM(npm); err != nil {
+		return err
 	}
 
 	data, err := h.extractionSvc.GetKRSExtraction(npm)
 	if err != nil {
-		return apperror.NotFound("KRS extraction not found for npm: "+npm, err)
+		if errors.Is(err, apperror.ErrExtractionNotFound) || errors.Is(err, os.ErrNotExist) {
+			return apperror.NotFound("KRS extraction not found for npm: "+npm, err)
+		}
+		if errors.Is(err, os.ErrPermission) {
+			return apperror.Forbidden("permission denied accessing KRS extraction")
+		}
+		return apperror.Internal("failed to retrieve KRS extraction", err)
 	}
 
 	// Return raw JSON bytes in the response envelope
@@ -150,13 +153,12 @@ func (h *ExtractionHandler) GetKHS(c fiber.Ctx) error {
 	tahunAjaran := c.Params("tahun_ajaran")
 	semester := c.Params("semester")
 
-	if npm == "" || tahunAjaran == "" || semester == "" {
-		return apperror.BadRequest("npm, tahun_ajaran, and semester parameters are required")
+	if tahunAjaran == "" || semester == "" {
+		return apperror.BadRequest("tahun_ajaran and semester parameters are required")
 	}
 
-	// Validate NPM format (digits only)
-	if !isValidNPM(npm) {
-		return apperror.BadRequest("npm must contain only digits")
+	if err := validateNPM(npm); err != nil {
+		return err
 	}
 
 	// Validate semester format
@@ -167,7 +169,13 @@ func (h *ExtractionHandler) GetKHS(c fiber.Ctx) error {
 
 	data, err := h.extractionSvc.GetKHSExtraction(npm, tahunAjaran, semester)
 	if err != nil {
-		return apperror.NotFound("KHS extraction not found", err)
+		if errors.Is(err, apperror.ErrExtractionNotFound) || errors.Is(err, os.ErrNotExist) {
+			return apperror.NotFound("KHS extraction not found", err)
+		}
+		if errors.Is(err, os.ErrPermission) {
+			return apperror.Forbidden("permission denied accessing KHS extraction")
+		}
+		return apperror.Internal("failed to retrieve KHS extraction", err)
 	}
 
 	// Return raw JSON bytes in the response envelope
@@ -177,17 +185,4 @@ func (h *ExtractionHandler) GetKHS(c fiber.Ctx) error {
 	}
 
 	return response.Success(c, fiber.StatusOK, result, "KHS data retrieved")
-}
-
-// isValidNPM validates NPM format (digits only, 8-12 characters).
-func isValidNPM(npm string) bool {
-	if len(npm) < 8 || len(npm) > 12 {
-		return false
-	}
-	for _, c := range npm {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
 }
