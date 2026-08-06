@@ -703,7 +703,7 @@ Content-Type: application/json
 ```
 
 > **Note:** This endpoint always re-extracts and overwrites existing cache.
-> Use GET `/api/v1/lms/krs/data/:npm` to retrieve cached data.
+> Use POST `/api/v1/lms/krs/data` with `{"npm":"..."}` to retrieve cached data.
 
 **Response 400 Bad Request — Missing NPM:**
 
@@ -827,7 +827,7 @@ Content-Type: application/json
 ```
 
 > **Note:** This endpoint always re-extracts and overwrites existing cache.
-> Use GET `/api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester` to retrieve cached data.
+> Use POST `/api/v1/lms/khs/data` with `{"npm":"...","tahun_ajaran":"...","semester":"..."}` to retrieve cached data.
 
 **Response 400 Bad Request — Missing NPM:**
 
@@ -932,13 +932,20 @@ curl -X POST http://localhost:3000/api/v1/lms/khs/extract \
 Get cached KRS extraction data.
 
 ```
-GET /api/v1/lms/krs/data/:npm
+POST /api/v1/lms/krs/data
+Content-Type: application/json
 ```
 
-**URL Parameters:**
+**Request Body:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
+```json
+{
+  "npm": "2211700006"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
 | `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 
 **Response 200 OK:**
@@ -967,6 +974,16 @@ GET /api/v1/lms/krs/data/:npm
     }
   },
   "message": "KRS data retrieved"
+}
+```
+
+**Response 400 Bad Request — Invalid Body:**
+
+```json
+{
+  "status": "error",
+  "message": "invalid request body",
+  "trace_id": "abc123..."
 }
 ```
 
@@ -1028,7 +1045,9 @@ GET /api/v1/lms/krs/data/:npm
 **Example curl:**
 
 ```bash
-curl http://localhost:3000/api/v1/lms/krs/data/2211700006
+curl -X POST http://localhost:3000/api/v1/lms/krs/data \
+  -H "Content-Type: application/json" \
+  -d '{"npm":"2211700006"}'
 ```
 
 ---
@@ -1038,13 +1057,22 @@ curl http://localhost:3000/api/v1/lms/krs/data/2211700006
 Get cached KHS extraction data.
 
 ```
-GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
+POST /api/v1/lms/khs/data
+Content-Type: application/json
 ```
 
-**URL Parameters:**
+**Request Body:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
+```json
+{
+  "npm": "2211700006",
+  "tahun_ajaran": "2022/2023",
+  "semester": "GENAP"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
 | `npm` | string | Yes | NPM (digits only, 8-12 characters) |
 | `tahun_ajaran` | string | Yes | Academic year (e.g. `2022/2023`) |
 | `semester` | string | Yes | Semester (`GANJIL` or `GENAP`) |
@@ -1082,12 +1110,22 @@ GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
 }
 ```
 
+**Response 400 Bad Request — Invalid Body:**
+
+```json
+{
+  "status": "error",
+  "message": "invalid request body",
+  "trace_id": "abc123..."
+}
+```
+
 **Response 400 Bad Request — Missing Parameters:**
 
 ```json
 {
   "status": "error",
-  "message": "tahun_ajaran and semester parameters are required",
+  "message": "tahun_ajaran and semester are required",
   "trace_id": "abc123..."
 }
 ```
@@ -1098,6 +1136,16 @@ GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
 {
   "status": "error",
   "message": "npm must be 8-12 characters",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — Invalid Semester:**
+
+```json
+{
+  "status": "error",
+  "message": "semester must be GANJIL or GENAP",
   "trace_id": "abc123..."
 }
 ```
@@ -1140,7 +1188,9 @@ GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
 **Example curl:**
 
 ```bash
-curl http://localhost:3000/api/v1/lms/khs/data/2211700006/2022/2023/GENAP
+curl -X POST http://localhost:3000/api/v1/lms/khs/data \
+  -H "Content-Type: application/json" \
+  -d '{"npm":"2211700006","tahun_ajaran":"2022/2023","semester":"GENAP"}'
 ```
 
 ---
@@ -1198,4 +1248,4 @@ curl http://localhost:3000/api/v1/lms/khs/data/2211700006/2022/2023/GENAP
 - Go 1.26.4+
 - Chrome/Chromium installed (for LMS login)
 - go-rod v0.116.2 (auto-installed via `go mod tidy`)
-- ledongthuc/pdf v0.4.1 (auto-installed via `go mod tidy`)
+- razvandimescu/gopdf (auto-installed via `go mod tidy`)
