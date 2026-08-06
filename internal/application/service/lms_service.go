@@ -204,7 +204,7 @@ func (s *lmsService) loginAndNavigate() (*browserInfra.Browser, *rod.Page, error
 }
 
 // DownloadKRS downloads the KRS PDF for the given NPM.
-// The PDF is saved to: {downloadDir}/{npm}/krs/krs.pdf
+// The PDF is saved to: {downloadDir}/{npm}/krs/semester_{N}.pdf
 func (s *lmsDocumentService) DownloadKRS(npm string) (*entity.KRSDownloadResult, error) {
 	br, page, err := s.lmsService.loginAndNavigate()
 	if err != nil {
@@ -212,13 +212,37 @@ func (s *lmsDocumentService) DownloadKRS(npm string) (*entity.KRSDownloadResult,
 	}
 	defer br.Close()
 
-	// KRS URL pattern: /admin/cetak/krs_pdf.php?nis={npm}
+	// Step 1: Navigate to KRS page to extract semester number
+	krsPageURL := s.lmsService.cfg.App.LMSBaseURL + browserInfra.KRSPagePath
+	slog.Info("navigating to KRS page", "url", krsPageURL)
+
+	if err := page.Navigate(krsPageURL); err != nil {
+		return nil, fmt.Errorf("navigate to KRS page: %w", err)
+	}
+	if err := page.WaitLoad(); err != nil {
+		return nil, fmt.Errorf("wait KRS page load: %w", err)
+	}
+
+	// Step 2: Extract semester number from the page
+	semesterEl, err := page.Element(browserInfra.SelKRSSemesterInput)
+	if err != nil {
+		return nil, fmt.Errorf("find semester input: %w", err)
+	}
+
+	semesterValue, err := semesterEl.Attribute("value")
+	if err != nil || semesterValue == nil {
+		return nil, fmt.Errorf("get semester value: %w", err)
+	}
+
+	semesterNum := *semesterValue
+	slog.Info("KRS semester extracted", "npm", npm, "semester", semesterNum)
+
+	// Step 3: Download KRS PDF
 	krsURL := s.lmsService.cfg.App.LMSBaseURL + browserInfra.KRSDownloadPath + "?nis=" + npm
 	slog.Info("downloading KRS", "url", krsURL)
 
-	// Build canonical save path: {downloadDir}/{npm}/krs/krs.pdf
-	// Note: KRS doesn't have tahun_ajaran/semester in URL, so we use fixed name
-	savePath := filepath.Join(s.lmsService.cfg.App.DownloadDir, npm, "krs", "krs.pdf")
+	// Build canonical save path: {downloadDir}/{npm}/krs/semester_{N}.pdf
+	savePath := filepath.Join(s.lmsService.cfg.App.DownloadDir, npm, "krs", fmt.Sprintf("semester_%s.pdf", semesterNum))
 
 	// Download and save
 	filename, size, err := browserInfra.DownloadAndSave(page, krsURL, savePath)

@@ -29,6 +29,10 @@ const (
 	// KHS detail page (main.php?op=mahasiswa_khs&act=cetak_detail)
 	SelKHSCetakBtn = "a[href*='khs_pdf.php']"
 
+	// KRS page (main.php?op=master_mahasiswa&act=konversi_upd_mhs)
+	SelKRSSemesterInput = "input[name='semester']" // semester number input
+
 	// KRS direct download URL pattern
 	KRSDownloadPath = "/admin/cetak/krs_pdf.php"
+	KRSPagePath     = "/admin/main.php?op=master_mahasiswa&act=konversi_upd_mhs"
 )
