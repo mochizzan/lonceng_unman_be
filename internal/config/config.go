@@ -27,7 +27,7 @@ type AppConfig struct {
 	LMSDashboardURL string
 	BrowserHeadless bool
 	BrowserTimeout  time.Duration
-	ActionTimeout   time.Duration
+	DNSTimeout      time.Duration
 	// Document Download
 	DownloadDir string
 	ExtractDir  string
@@ -36,6 +36,7 @@ type AppConfig struct {
 	MaxSessions int
 	// Server Limits
 	MaxBodySize int64
+	MaxPDFSize  int64
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -61,17 +62,18 @@ func New() (*Config, error) {
 			LMSDashboardURL: getEnv("LMS_DASHBOARD_URL", "https://elearning.universitasmandiri.ac.id/admin/"),
 			BrowserHeadless: getEnvBool("BROWSER_HEADLESS", true),
 			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 60*time.Second),
-			ActionTimeout:   getEnvDuration("ACTION_TIMEOUT", 10*time.Second),
+			DNSTimeout:      getEnvDuration("DNS_TIMEOUT", 5*time.Second),
 			DownloadDir:     getEnv("DOWNLOAD_DIR", "./downloads"),
 			ExtractDir:      getEnv("EXTRACT_DIR", "./extracted"),
 			SessionTTL:      getEnvDuration("SESSION_TTL", 15*time.Minute),
 			MaxSessions:     getEnvInt("MAX_SESSIONS", 10),
 			MaxBodySize:     parseByteSize(getEnv("MAX_BODY_SIZE", "1MB")),
+			MaxPDFSize:      parseByteSize(getEnv("MAX_PDF_SIZE", "50MB")),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
-			AllowMethods: getEnv("CORS_ALLOW_METHODS", "GET,POST,PUT,PATCH,DELETE,OPTIONS"),
-			AllowHeaders: getEnv("CORS_ALLOW_HEADERS", "Content-Type,Authorization"),
+			AllowMethods: getEnv("CORS_ALLOW_METHODS", "GET,POST,OPTIONS"),
+			AllowHeaders: getEnv("CORS_ALLOW_HEADERS", "Content-Type"),
 		},
 	}
 
@@ -104,10 +106,6 @@ func (c *Config) Validate() error {
 
 	if c.App.BrowserTimeout <= 0 {
 		return fmt.Errorf("browser_timeout must be a positive duration; got %v", c.App.BrowserTimeout)
-	}
-
-	if c.App.ActionTimeout <= 0 {
-		return fmt.Errorf("action_timeout must be a positive duration; got %v", c.App.ActionTimeout)
 	}
 
 	if c.App.DownloadDir == "" {

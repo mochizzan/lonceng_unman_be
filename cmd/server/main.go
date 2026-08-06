@@ -28,6 +28,9 @@ func main() {
 	log := logger.New(cfg.App.Env)
 	slog.SetDefault(log)
 
+	// Configure extractor limits from config
+	extractor.SetMaxPDFSize(cfg.App.MaxPDFSize)
+
 	// Create Fiber app with custom error handler
 	app := fiber.New(fiber.Config{
 		AppName:      cfg.App.Name,

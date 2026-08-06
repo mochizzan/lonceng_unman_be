@@ -10,9 +10,17 @@ import (
 	gopdf "github.com/razvandimescu/gopdf/pdf"
 )
 
-const (
-	maxPDFSize = 50 * 1024 * 1024 // 50MB limit
-)
+// maxPDFSize is the default PDF file size limit (50MB).
+// It can be overridden via SetMaxPDFSize before parsing.
+var maxPDFSize int64 = 50 * 1024 * 1024
+
+// SetMaxPDFSize overrides the default PDF size limit.
+// Call this from main.go after loading config.
+func SetMaxPDFSize(size int64) {
+	if size > 0 {
+		maxPDFSize = size
+	}
+}
 
 // openPDF validates a PDF file exists and is within size limits, then opens it.
 func openPDF(path string) (*gopdf.Document, error) {

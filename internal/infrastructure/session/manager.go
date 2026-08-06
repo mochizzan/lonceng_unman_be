@@ -162,7 +162,11 @@ func (m *Manager) checkDNS(rawURL string) error {
 	}
 	host := u.Hostname()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	dnsTimeout := m.cfg.App.DNSTimeout
+	if dnsTimeout == 0 {
+		dnsTimeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
 	defer cancel()
 
 	resolver := &net.Resolver{}
@@ -278,7 +282,11 @@ func (m *Manager) login(page *rod.Page, npm, password string) error {
 	if err != nil {
 		return fmt.Errorf("get page info: %w", err)
 	}
-	if !strings.Contains(info.URL, "/admin/") {
+	dashboardURL := m.cfg.App.LMSDashboardURL
+	if dashboardURL == "" {
+		dashboardURL = "/admin/"
+	}
+	if !strings.Contains(info.URL, dashboardURL) {
 		return fmt.Errorf("login failed: page did not redirect to dashboard (url: %s)", info.URL)
 	}
 

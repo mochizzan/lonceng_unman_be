@@ -376,18 +376,19 @@ recover → requestid → logger → cors
 | `APP_PORT` | `3000` | Server port (validated: 1-65535) |
 | `APP_HOST` | `0.0.0.0` | Bind address |
 | `LMS_BASE_URL` | `https://elearning.universitasmandiri.ac.id` | LMS base URL |
-| `LMS_DASHBOARD_URL` | `https://elearning.universitasmandiri.ac.id/admin/` | LMS dashboard URL after login |
+| `LMS_DASHBOARD_URL` | `https://elearning.universitasmandiri.ac.id/admin/` | LMS dashboard URL (used for login success detection) |
 | `BROWSER_HEADLESS` | `true` | Run Chrome headless |
-| `BROWSER_TIMEOUT` | `30s` | Overall browser operation timeout |
-| `ACTION_TIMEOUT` | `10s` | Per-action timeout (click, fill, etc.) |
+| `BROWSER_TIMEOUT` | `60s` | Overall browser operation timeout |
+| `DNS_TIMEOUT` | `5s` | DNS lookup timeout before browser connection |
 | `DOWNLOAD_DIR` | `./downloads` | PDF download directory |
 | `EXTRACT_DIR` | `./extracted` | Extraction cache directory |
 | `SESSION_TTL` | `15m` | Session cache TTL before expiry |
 | `MAX_SESSIONS` | `10` | Maximum concurrent browser sessions |
 | `MAX_BODY_SIZE` | `1MB` | Max HTTP request body size |
+| `MAX_PDF_SIZE` | `50MB` | Max PDF file size for extraction |
 | `CORS_ALLOW_ORIGINS` | `*` | CORS allowed origins |
-| `CORS_ALLOW_METHODS` | `GET,POST,PUT,PATCH,DELETE,OPTIONS` | CORS allowed methods |
-| `CORS_ALLOW_HEADERS` | `Content-Type,Authorization` | CORS allowed headers |
+| `CORS_ALLOW_METHODS` | `GET,POST,OPTIONS` | CORS allowed methods |
+| `CORS_ALLOW_HEADERS` | `Content-Type` | CORS allowed headers |
 
 ---
 

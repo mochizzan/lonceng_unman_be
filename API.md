@@ -1228,18 +1228,19 @@ curl -X POST http://localhost:3000/api/v1/lms/khs/data \
 | `APP_PORT` | `3000` | Server port (1-65535) |
 | `APP_HOST` | `0.0.0.0` | Bind address |
 | `LMS_BASE_URL` | `https://elearning.universitasmandiri.ac.id` | LMS base URL |
-| `LMS_DASHBOARD_URL` | `https://elearning.universitasmandiri.ac.id/admin/` | Dashboard URL after login |
+| `LMS_DASHBOARD_URL` | `https://elearning.universitasmandiri.ac.id/admin/` | Dashboard URL (used for login success detection) |
 | `BROWSER_HEADLESS` | `true` | Run Chrome headless |
-| `BROWSER_TIMEOUT` | `30s` | Overall browser operation timeout |
-| `ACTION_TIMEOUT` | `10s` | Per-action timeout (click, fill, etc.) |
+| `BROWSER_TIMEOUT` | `60s` | Overall browser operation timeout |
+| `DNS_TIMEOUT` | `5s` | DNS lookup timeout before browser connection |
 | `DOWNLOAD_DIR` | `./downloads` | Download directory |
+| `EXTRACT_DIR` | `./extracted` | Directory for extracted JSON files |
 | `SESSION_TTL` | `15m` | Session cache duration before expiry |
 | `MAX_SESSIONS` | `10` | Maximum cached sessions in memory |
-| `EXTRACT_DIR` | `./extracted` | Directory for extracted JSON files |
 | `MAX_BODY_SIZE` | `1MB` | Max HTTP request body size |
+| `MAX_PDF_SIZE` | `50MB` | Max PDF file size for extraction |
 | `CORS_ALLOW_ORIGINS` | `*` | CORS allowed origins |
-| `CORS_ALLOW_METHODS` | `GET,POST,PUT,PATCH,DELETE,OPTIONS` | CORS allowed methods |
-| `CORS_ALLOW_HEADERS` | `Content-Type,Authorization` | CORS allowed headers |
+| `CORS_ALLOW_METHODS` | `GET,POST,OPTIONS` | CORS allowed methods |
+| `CORS_ALLOW_HEADERS` | `Content-Type` | CORS allowed headers |
 
 ---
 
