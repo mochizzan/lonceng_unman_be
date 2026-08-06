@@ -8,6 +8,26 @@ import (
 	"lonceng_unman_be/internal/domain/entity"
 )
 
+// indonesianMonths maps Indonesian month names to English for date parsing.
+var indonesianMonths = map[string]string{
+	"Januari": "January", "Februari": "February", "Maret": "March",
+	"April": "April", "Mei": "May", "Juni": "June",
+	"Juli": "July", "Agustus": "August", "September": "September",
+	"Oktober": "October", "November": "November", "Desember": "December",
+}
+
+// dateFormats lists Go time.Parse formats to try for Indonesian dates.
+var dateFormats = []string{"2 January 2006", "02 January 2006", "January 2, 2006"}
+
+// dateOutputFormat is the ISO date format used for output.
+const dateOutputFormat = "2006-01-02"
+
+// indonesianDays lists Indonesian day names for schedule parsing.
+var indonesianDays = []string{"Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"}
+
+// MaxSKS is the maximum plausible SKS credit value.
+const MaxSKS = 12
+
 // ParseKRS extracts structured KRS data from a PDF file.
 // It uses ReadPDF (plain text) for header fields to preserve word spacing,
 // and ReadPDFWithPosition for table data that needs column positions.
@@ -173,76 +193,6 @@ func FindNextValueLine(lines []string, startIdx int) string {
 	return ""
 }
 
-// parseKRSHeader extracts student info and period from header section.
-func parseKRSHeader(lines []string, result *entity.KRSExtraction) {
-	for i, line := range lines {
-		normalized := NormalizeLabel(line)
-
-		// Look for student name pattern: "Nama : XXXX" or "Nama" + next line ": XXXX"
-		if strings.Contains(normalized, "Nama") {
-			if strings.Contains(line, ":") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					result.KRS.Mahasiswa.Nama = strings.TrimSpace(parts[1])
-				}
-			} else if val := FindNextValueLine(lines, i); val != "" {
-				result.KRS.Mahasiswa.Nama = val
-			}
-		}
-
-		// Look for NPM pattern: "NPM : XXXX" or "N P M" + next line ": XXXX"
-		if strings.Contains(normalized, "NPM") {
-			if strings.Contains(line, ":") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					npm := strings.TrimSpace(parts[1])
-					if npm != "" {
-						result.KRS.Mahasiswa.NPM = npm
-					}
-				}
-			} else if val := FindNextValueLine(lines, i); val != "" {
-				result.KRS.Mahasiswa.NPM = val
-			}
-		}
-
-		// Look for program studi: "Program Studi : XXXX" or "Program Studi" + next line ": XXXX"
-		if strings.Contains(normalized, "Program Studi") {
-			if strings.Contains(line, ":") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					result.KRS.Mahasiswa.ProgramStudi = strings.TrimSpace(parts[1])
-				}
-			} else if val := FindNextValueLine(lines, i); val != "" {
-				result.KRS.Mahasiswa.ProgramStudi = val
-			}
-		}
-
-		// Look for tahun ajaran: "Tahun Ajaran : 2025/2026"
-		if strings.Contains(normalized, "Tahun Ajaran") {
-			if strings.Contains(line, ":") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					result.KRS.Periode.TahunAjaran = strings.TrimSpace(parts[1])
-				}
-			} else if val := FindNextValueLine(lines, i); val != "" {
-				result.KRS.Periode.TahunAjaran = val
-			}
-		}
-
-		// Look for semester: "Semester : GENAP" or "Semester" + next line ": GENAP"
-		if strings.Contains(normalized, "Semester") {
-			if strings.Contains(line, ":") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					result.KRS.Periode.Semester = strings.TrimSpace(parts[1])
-				}
-			} else if val := FindNextValueLine(lines, i); val != "" {
-				result.KRS.Periode.Semester = val
-			}
-		}
-	}
-}
-
 // parseKRSMataKuliah extracts course table from KRS.
 func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtraction) {
 	// Find table start marker
@@ -300,7 +250,7 @@ func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtract
 
 			// Try to parse SKS
 			for j := 3; j < len(words); j++ {
-				if sks := parseIntSafe(words[j].Text); sks > 0 && sks <= 12 {
+				if sks := parseIntSafe(words[j].Text); sks > 0 && sks <= MaxSKS {
 					course.SKS = sks
 					break
 				}
@@ -352,8 +302,7 @@ func parseJadwal(line string) entity.KRSJadwal {
 	jadwal := entity.KRSJadwal{}
 
 	// Extract day
-	days := []string{"Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"}
-	for _, day := range days {
+	for _, day := range indonesianDays {
 		if strings.Contains(line, day) {
 			jadwal.Hari = day
 			break
@@ -400,14 +349,6 @@ func isValidTime(s string) bool {
 // parseKRSPenerbitan extracts publication info from KRS.
 // Handles Indonesian date formats: "6 Agustus 2026", "06 Agustus 2026"
 func parseKRSPenerbitan(lines []string, result *entity.KRSExtraction) {
-	// Indonesian month names
-	indonesianMonths := map[string]string{
-		"Januari": "January", "Februari": "February", "Maret": "March",
-		"April": "April", "Mei": "May", "Juni": "June",
-		"Juli": "July", "Agustus": "August", "September": "September",
-		"Oktober": "October", "November": "November", "Desember": "December",
-	}
-
 	for _, line := range lines {
 		normalized := NormalizeLabel(line)
 		// Look for "Dikeluarkan di" pattern
@@ -426,10 +367,9 @@ func parseKRSPenerbitan(lines []string, result *entity.KRSExtraction) {
 				}
 
 				// Try multiple date formats
-				dateFormats := []string{"2 January 2006", "02 January 2006", "2 January 2006", "January 2, 2006"}
 				for _, format := range dateFormats {
 					if t, err := time.Parse(format, dateStr); err == nil {
-						result.KRS.Penerbitan.Tanggal = t.Format("2006-01-02")
+						result.KRS.Penerbitan.Tanggal = t.Format(dateOutputFormat)
 						break
 					}
 				}
