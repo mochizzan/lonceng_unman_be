@@ -51,6 +51,9 @@ func (h *ExtractionHandler) ExtractKRS(c fiber.Ctx) error {
 
 	result, err := h.extractionSvc.ExtractKRS(req.NPM, req.Password)
 	if err != nil {
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no krs pdf") {
+			return apperror.NotFound("KRS PDF not found for npm: "+req.NPM, err)
+		}
 		return apperror.Internal("KRS extraction failed", err)
 	}
 
@@ -80,6 +83,9 @@ func (h *ExtractionHandler) ExtractKHS(c fiber.Ctx) error {
 
 	result, err := h.extractionSvc.ExtractKHS(req.NPM, req.Password, req.TahunAjaran, req.Semester)
 	if err != nil {
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "khs pdf not found") {
+			return apperror.NotFound("KHS PDF not found", err)
+		}
 		return apperror.Internal("KHS extraction failed", err)
 	}
 
