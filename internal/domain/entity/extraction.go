@@ -18,8 +18,11 @@ type KRSMahasiswa struct {
 
 // KRSPeriode represents the academic period in KRS.
 type KRSPeriode struct {
-	TahunAjaran string `json:"tahun_ajaran"`
-	Semester    string `json:"semester"`
+	TahunAjaran struct {
+		Awal  string `json:"awal"`
+		Akhir string `json:"akhir"`
+	} `json:"tahun_ajaran"`
+	Semester string `json:"semester"`
 }
 
 // KRSJadwal represents a class schedule in KRS.
@@ -80,8 +83,11 @@ type KHSMahasiswa struct {
 
 // KHSPeriode represents the academic period in KHS.
 type KHSPeriode struct {
-	TahunAjaran string `json:"tahun_ajaran"`
-	Semester    string `json:"semester"`
+	TahunAjaran struct {
+		Awal  string `json:"awal"`
+		Akhir string `json:"akhir"`
+	} `json:"tahun_ajaran"`
+	Semester string `json:"semester"`
 }
 
 // KHSMataKuliah represents a course entry in KHS.

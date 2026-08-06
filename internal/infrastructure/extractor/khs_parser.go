@@ -23,8 +23,18 @@ func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*en
 
 	result := &entity.KHSExtraction{}
 	result.KHS.Mahasiswa.NPM = npm
-	result.KHS.Periode.TahunAjaran = tahunAjaran
 	result.KHS.Periode.Semester = semester
+
+	// Split tahun ajaran "2025/2026" into awal/akhir
+	if tahunAjaran != "" {
+		parts := strings.SplitN(tahunAjaran, "/", 2)
+		if len(parts) == 2 {
+			result.KHS.Periode.TahunAjaran.Awal = strings.TrimSpace(parts[0])
+			result.KHS.Periode.TahunAjaran.Akhir = strings.TrimSpace(parts[1])
+		} else {
+			result.KHS.Periode.TahunAjaran.Awal = tahunAjaran
+		}
+	}
 
 	// Use plain text for header fields (preserves spaces)
 	plainText, err := ReadPDF(path)

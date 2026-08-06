@@ -38,7 +38,7 @@ var dateFormats = []string{
 	"1/2/2006",
 }
 
-const dateOutputFormat = "2006-01-02"
+const dateOutputFormat = "2006-01-02T15:04:05-07:00"
 
 // MaxSKS is the maximum SKS value allowed for validation.
 const MaxSKS = 12

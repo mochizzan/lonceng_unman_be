@@ -83,8 +83,18 @@ func parsePlainTextHeaderKRS(lines []string, result *entity.KRSExtraction) {
 	result.KRS.Mahasiswa.NPM = fields["N P M"]
 	result.KRS.Mahasiswa.Nama = fields["Nama"]
 	result.KRS.Mahasiswa.ProgramStudi = fields["Program Studi"]
-	result.KRS.Periode.TahunAjaran = fields["Tahun Ajaran"]
 	result.KRS.Periode.Semester = fields["Semester"]
+
+	// Split tahun ajaran "2025/2026" into awal/akhir
+	if ta := fields["Tahun Ajaran"]; ta != "" {
+		parts := strings.SplitN(ta, "/", 2)
+		if len(parts) == 2 {
+			result.KRS.Periode.TahunAjaran.Awal = strings.TrimSpace(parts[0])
+			result.KRS.Periode.TahunAjaran.Akhir = strings.TrimSpace(parts[1])
+		} else {
+			result.KRS.Periode.TahunAjaran.Awal = ta
+		}
+	}
 }
 
 // krsColumnNames defines the expected column headers for KRS table extraction.
@@ -327,10 +337,10 @@ func parseJadwal(line string) entity.KRSJadwal {
 	}
 
 	if len(times) >= 2 {
-		jadwal.WaktuMulai = times[0]
-		jadwal.WaktuSelesai = times[1]
+		jadwal.WaktuMulai = times[0] + ":00"
+		jadwal.WaktuSelesai = times[1] + ":00"
 	} else if len(times) == 1 {
-		jadwal.WaktuMulai = times[0]
+		jadwal.WaktuMulai = times[0] + ":00"
 	}
 
 	return jadwal
