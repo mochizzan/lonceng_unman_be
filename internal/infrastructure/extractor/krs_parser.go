@@ -2,6 +2,7 @@ package extractor
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -29,30 +30,43 @@ var indonesianDays = []string{"Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabt
 const MaxSKS = 12
 
 // ParseKRS extracts structured KRS data from a PDF file.
-// It uses ReadPDF (plain text) for header fields to preserve word spacing,
-// and ReadPDFWithPosition for table data that needs column positions.
+// It uses ReadPDF (plain text) for header fields and table data to preserve word spacing,
+// and ReadPDFWithPosition as fallback for table data that needs column positions.
 func ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
+	// Validate file exists before parsing
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("pdf file not found: %s", path)
+		}
+		return nil, fmt.Errorf("stat pdf: %w", err)
+	}
+
 	result := &entity.KRSExtraction{}
 	result.KRS.Mahasiswa.NPM = npm
 
-	// Use plain text for header fields (preserves spaces)
+	// Use plain text for header fields and table data (preserves spaces)
 	plainText, err := ReadPDF(path)
 	if err == nil {
 		parsePlainTextHeaderKRS(plainText, result)
+		parsePlainTextTableKRS(plainText, result)
 	}
 
-	// Use position-based extraction for table data
+	// Use position-based extraction as fallback if plain text table parsing failed
+	if len(result.KRS.MataKuliah) == 0 {
+		rows, posErr := ReadPDFWithPosition(path)
+		if posErr == nil {
+			lines := RowsToLines(rows)
+			parseKRSMataKuliah(rows, lines, result)
+		}
+	}
+
+	// Parse penerbitan and persetujuan from position-based extraction
 	rows, err := ReadPDFWithPosition(path)
-	if err != nil {
-		return nil, fmt.Errorf("read pdf: %w", err)
+	if err == nil {
+		lines := RowsToLines(rows)
+		parseKRSPenerbitan(lines, result)
+		parseKRSPersetujuan(lines, result)
 	}
-
-	lines := RowsToLines(rows)
-
-	// Parse table and other sections
-	parseKRSMataKuliah(rows, lines, result)
-	parseKRSPenerbitan(lines, result)
-	parseKRSPersetujuan(lines, result)
 
 	// Set metadata
 	result.Metadata.ExtractedAt = time.Now()
@@ -188,6 +202,151 @@ func FindNextValueLine(lines []string, startIdx int) string {
 		nextLine := strings.TrimSpace(lines[j])
 		if strings.HasPrefix(nextLine, ":") {
 			return strings.TrimSpace(strings.TrimPrefix(nextLine, ":"))
+		}
+	}
+	return ""
+}
+
+// parsePlainTextTableKRS extracts the course table from plain text output.
+// The plain text format has each column value on a separate line:
+//
+// No.
+// Kode
+// Mata Kuliah
+// SKS
+// KELAS
+// DOSEN
+// JADWAL
+// 1
+// SI40306
+// Tugas Akhir/Skripsi
+// 6
+// SI-8A
+// TIM DOSEN FAKULTAS TEKNIK
+// Sabtu
+// 08:00 s/d 09:40
+//
+// This produces correctly spaced text unlike position-based extraction.
+func parsePlainTextTableKRS(text string, result *entity.KRSExtraction) {
+	lines := strings.Split(text, "\n")
+
+	// Find the header row: look for consecutive lines matching column names
+	headerIdx := -1
+	for i := 0; i < len(lines)-6; i++ {
+		if strings.TrimSpace(lines[i]) == "No." &&
+			strings.TrimSpace(lines[i+1]) == "Kode" &&
+			strings.TrimSpace(lines[i+2]) == "Mata Kuliah" {
+			headerIdx = i
+			break
+		}
+	}
+
+	if headerIdx == -1 {
+		return
+	}
+
+	// Find the table end: look for "Total"
+	tableEnd := len(lines)
+	for i := headerIdx + 7; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "Total" {
+			tableEnd = i
+			break
+		}
+	}
+
+	// Each course takes 7 lines (No, Kode, Mata Kuliah, SKS, KELAS, DOSEN)
+	// plus optionally 2 lines for schedule (day, time)
+	// Parse course by course
+	var courses []entity.KRSMataKuliah
+	courseNo := 1
+
+	dataStart := headerIdx + 7 // skip 7 header lines
+	for i := dataStart; i < tableEnd; {
+		// Read 7 lines for one course
+		if i+6 >= tableEnd {
+			break
+		}
+
+		// Skip empty lines
+		for i < tableEnd && strings.TrimSpace(lines[i]) == "" {
+			i++
+		}
+		if i+6 >= tableEnd {
+			break
+		}
+
+		kode := strings.TrimSpace(lines[i+1])
+		nama := strings.TrimSpace(lines[i+2])
+		sksStr := strings.TrimSpace(lines[i+3])
+		kelas := strings.TrimSpace(lines[i+4])
+		dosen := strings.TrimSpace(lines[i+5])
+
+		// Validate: Kode should be a course code (contains digits)
+		if kode == "" || len(kode) < 3 {
+			i++
+			continue
+		}
+		hasDigit := false
+		for _, r := range kode {
+			if r >= '0' && r <= '9' {
+				hasDigit = true
+				break
+			}
+		}
+		if !hasDigit {
+			i++
+			continue
+		}
+
+		// Parse SKS
+		sks := parseIntSafe(sksStr)
+
+		course := entity.KRSMataKuliah{
+			No:    courseNo,
+			Kode:  kode,
+			Nama:  nama,
+			SKS:   sks,
+			Kelas: kelas,
+			Dosen: dosen,
+		}
+
+		i += 6 // advance past the 7 course lines (0-6)
+
+		// Check for schedule (day + time) in next lines
+		if i < tableEnd {
+			dayLine := strings.TrimSpace(lines[i])
+			if isIndonesianDay(dayLine) {
+				course.Jadwal.Hari = extractDayName(dayLine)
+				i++
+				if i < tableEnd {
+					timeLine := strings.TrimSpace(lines[i])
+					if strings.Contains(timeLine, ":") {
+						course.Jadwal = parseJadwal(dayLine + " " + timeLine)
+						i++
+					}
+				}
+			}
+		}
+
+		courses = append(courses, course)
+		courseNo++
+	}
+
+	result.KRS.MataKuliah = courses
+
+	// Calculate total SKS
+	total := 0
+	for _, c := range courses {
+		total += c.SKS
+	}
+	result.KRS.TotalSKS = total
+}
+
+// extractDayName extracts the Indonesian day name from a line.
+func extractDayName(line string) string {
+	for _, day := range indonesianDays {
+		if strings.Contains(line, day) {
+			return day
 		}
 	}
 	return ""

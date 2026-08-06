@@ -2,6 +2,7 @@ package extractor
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -30,6 +31,14 @@ const MaxSKSKHS = 12
 // It uses ReadPDF (plain text) for header fields to preserve word spacing,
 // and ReadPDFWithPosition for table data that needs column positions.
 func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*entity.KHSExtraction, error) {
+	// Validate file exists before parsing
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("pdf file not found: %s", path)
+		}
+		return nil, fmt.Errorf("stat pdf: %w", err)
+	}
+
 	result := &entity.KHSExtraction{}
 	result.KHS.Mahasiswa.NPM = npm
 	result.KHS.Periode.TahunAjaran = tahunAjaran

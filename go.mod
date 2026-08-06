@@ -6,7 +6,7 @@ require (
 	github.com/go-rod/rod v0.116.2
 	github.com/gofiber/fiber/v3 v3.4.0
 	github.com/joho/godotenv v1.5.1
-	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
+	github.com/razvandimescu/gopdf v0.9.5
 )
 
 require (

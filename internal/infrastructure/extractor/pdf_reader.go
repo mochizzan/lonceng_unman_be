@@ -1,14 +1,13 @@
 package extractor
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/ledongthuc/pdf"
+	gopdf "github.com/razvandimescu/gopdf/pdf"
 )
 
 const (
@@ -29,23 +28,16 @@ func ReadPDF(path string) (string, error) {
 		return "", fmt.Errorf("pdf too large: %d bytes (max %d)", info.Size(), maxPDFSize)
 	}
 
-	f, r, err := pdf.Open(path)
+	doc, err := gopdf.OpenFile(path)
 	if err != nil {
 		return "", fmt.Errorf("open pdf (may be corrupted): %w", err)
 	}
-	defer f.Close()
 
-	var buf bytes.Buffer
-	b, err := r.GetPlainText()
+	text, err := doc.Text()
 	if err != nil {
-		return "", fmt.Errorf("get plain text: %w", err)
-	}
-	_, err = buf.ReadFrom(b)
-	if err != nil {
-		return "", fmt.Errorf("read buffer: %w", err)
+		return "", fmt.Errorf("extract text: %w", err)
 	}
 
-	text := buf.String()
 	if strings.TrimSpace(text) == "" {
 		return "", fmt.Errorf("pdf contains no extractable text (may be image-only)")
 	}
@@ -82,13 +74,12 @@ func ReadPDFWithPosition(path string) ([]PDFRow, error) {
 		return nil, fmt.Errorf("pdf too large: %d bytes (max %d)", info.Size(), maxPDFSize)
 	}
 
-	f, r, err := pdf.Open(path)
+	doc, err := gopdf.OpenFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("open pdf (may be corrupted): %w", err)
 	}
-	defer f.Close()
 
-	totalPage := r.NumPage()
+	totalPage := doc.NumPages()
 	if totalPage == 0 {
 		return nil, fmt.Errorf("pdf has no pages")
 	}
@@ -96,28 +87,42 @@ func ReadPDFWithPosition(path string) ([]PDFRow, error) {
 	var allRows []PDFRow
 	var pageErrors []string
 
-	for pageIndex := 1; pageIndex <= totalPage; pageIndex++ {
-		p := r.Page(pageIndex)
-		if p.V.IsNull() {
-			pageErrors = append(pageErrors, fmt.Sprintf("page %d is null", pageIndex))
+	for pageIndex := 0; pageIndex < totalPage; pageIndex++ {
+		p := doc.Page(pageIndex)
+		if p == nil {
+			pageErrors = append(pageErrors, fmt.Sprintf("page %d is nil", pageIndex+1))
 			continue
 		}
 
-		content := p.Content()
-		texts := content.Text
+		spans, err := p.TextSpans()
+		if err != nil {
+			pageErrors = append(pageErrors, fmt.Sprintf("page %d: %v", pageIndex+1, err))
+			continue
+		}
 
-		// Group words by Y position (rows)
+		if len(spans) == 0 {
+			continue
+		}
+
+		// Get page height for Y-axis flip (PDF Y=0 at bottom, screen Y=0 at top)
+		mb := p.MediaBox()
+		pageHeight := mb[3] // ury
+
+		// Group spans by Y position (rows)
 		rowMap := make(map[float64]*PDFRow)
 		var yPositions []float64
 
-		for _, t := range texts {
-			word := strings.TrimSpace(t.S)
+		for _, span := range spans {
+			word := strings.TrimSpace(span.Text)
 			if word == "" {
 				continue
 			}
 
-			// Round Y to group words on same line
-			yKey := roundY(t.Y)
+			// Flip Y-axis: PDF Y=0 at bottom → screen Y=0 at top
+			flippedY := pageHeight - span.Y
+
+			// Round Y to group spans on same line
+			yKey := roundY(flippedY)
 
 			if _, exists := rowMap[yKey]; !exists {
 				rowMap[yKey] = &PDFRow{Y: yKey}
@@ -126,10 +131,10 @@ func ReadPDFWithPosition(path string) ([]PDFRow, error) {
 
 			rowMap[yKey].Words = append(rowMap[yKey].Words, PDFWord{
 				Text: word,
-				X:    t.X,
-				Y:    t.Y,
-				Font: t.Font,
-				Size: t.FontSize,
+				X:    span.X,
+				Y:    flippedY,
+				Font: span.Font,
+				Size: span.FontSize,
 			})
 		}
 
@@ -352,7 +357,7 @@ func FindColumnPositions(headerRow PDFRow, columnNames []string) []ColumnBoundar
 // ExtractColumnsFromRow extracts text from a PDFRow using column boundaries.
 // Returns a map of column name to the reconstructed text of words within that column's X range.
 // Characters at the same X position (within tolerance) are joined without spaces,
-// matching how RowToLine reconstructs words from individual characters.
+// then smart word splitting is applied to insert spaces between concatenated words.
 func ExtractColumnsFromRow(row PDFRow, boundaries []ColumnBoundary) map[string]string {
 	result := make(map[string]string)
 	for _, col := range boundaries {
@@ -388,14 +393,133 @@ func ExtractColumnsFromRow(row PDFRow, boundaries []ColumnBoundary) map[string]s
 			currentGroup.texts = append(currentGroup.texts, w.Text)
 		}
 
-		// Join each group without spaces, separate groups with spaces
+		// Join each group without spaces, then apply smart word splitting
 		var parts []string
 		for _, g := range groups {
-			parts = append(parts, strings.Join(g.texts, ""))
+			joined := strings.Join(g.texts, "")
+			parts = append(parts, SmartWordSplit(joined))
 		}
 		result[col.Name] = strings.Join(parts, " ")
 	}
 	return result
+}
+
+// SmartWordSplit inserts spaces between concatenated words in a string.
+// It handles common patterns from PDF text extraction:
+//   - CamelCase: "TugasAkhir" → "Tugas Akhir"
+//   - Punctuation boundaries: "TugasAkhir/Skripsi" → "Tugas Akhir/Skripsi"
+//   - Known abbreviations are preserved: "SI40306", "SI-8A"
+func SmartWordSplit(s string) string {
+	if len(s) <= 1 {
+		return s
+	}
+
+	// Don't split pure numbers, single chars, or known codes
+	if isKnownCode(s) {
+		return s
+	}
+
+	var result []rune
+	runes := []rune(s)
+
+	for i, r := range runes {
+		result = append(result, r)
+
+		if i == len(runes)-1 {
+			continue
+		}
+
+		next := runes[i+1]
+
+		// Insert space before uppercase letter that follows a lowercase letter
+		// "TugasAkhir" → "Tugas Akhir"
+		if isLowerLetter(r) && IsUpperLetter(next) {
+			result = append(result, ' ')
+			continue
+		}
+
+		// Insert space before uppercase letter that follows a digit
+		// "2SI" → "2 SI" (but not "SI4" → "S I 4")
+		if isDigit(r) && IsUpperLetter(next) && i+2 < len(runes) && isDigit(runes[i+2]) {
+			result = append(result, ' ')
+			continue
+		}
+
+		// Insert space before digit that follows an uppercase letter (end of abbreviation)
+		// "TIM2" → "TIM 2" (but not "SI4" where 4 is part of code)
+		if IsUpperLetter(r) && isDigit(next) && i+1 < len(runes) {
+			// Check if this is likely an abbreviation followed by a number
+			// Look back to see if we have multiple uppercase letters (abbreviation)
+			upperCount := 0
+			for j := i; j >= 0 && j > i-4; j-- {
+				if IsUpperLetter(runes[j]) {
+					upperCount++
+				} else {
+					break
+				}
+			}
+			// If we have 2+ uppercase letters, this is likely end of abbreviation
+			if upperCount >= 2 {
+				result = append(result, ' ')
+			}
+		}
+	}
+
+	return string(result)
+}
+
+// isDigit checks if a rune is a digit.
+func isDigit(r rune) bool {
+	return r >= '0' && r <= '9'
+}
+
+// isKnownCode checks if a string is a known code pattern that should not be split.
+// Patterns: SI40306, KK21250723, SI-8A, etc.
+func isKnownCode(s string) bool {
+	// Pure numbers
+	allDigits := true
+	for _, r := range s {
+		if !isDigit(r) && r != '.' && r != ',' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		return true
+	}
+
+	// Pattern: 2+ uppercase letters followed by digits (course code)
+	// e.g., SI40306, KK21250723, UM21250122
+	if len(s) >= 4 {
+		upperCount := 0
+		for _, r := range s {
+			if IsUpperLetter(r) {
+				upperCount++
+			} else if isDigit(r) {
+				break
+			} else {
+				return false
+			}
+		}
+		if upperCount >= 2 {
+			return true
+		}
+	}
+
+	// Pattern: XX-##A (class code like SI-8A)
+	if len(s) >= 3 && strings.Contains(s, "-") {
+		parts := strings.Split(s, "-")
+		if len(parts) == 2 && len(parts[0]) >= 2 && len(parts[1]) >= 1 {
+			return true
+		}
+	}
+
+	// Single character
+	if len([]rune(s)) <= 1 {
+		return true
+	}
+
+	return false
 }
 
 // parseIntSafe safely parses an integer string.
