@@ -11,7 +11,6 @@ import (
 	"lonceng_unman_be/internal/config"
 	"lonceng_unman_be/internal/domain/entity"
 	"lonceng_unman_be/internal/domain/port"
-	browserInfra "lonceng_unman_be/internal/infrastructure/browser"
 )
 
 // LMSLogin defines the contract for LMS login operations.
@@ -90,7 +89,7 @@ func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity
 	defer session.Close()
 
 	// Navigate to KRS page to extract semester number.
-	krsPageURL := s.cfg.App.LMSBaseURL + browserInfra.KRSPagePath
+	krsPageURL := s.cfg.App.LMSBaseURL + port.KRSPagePath
 	slog.Info("navigating to KRS page", "url", krsPageURL)
 
 	if err := session.Navigate(krsPageURL); err != nil {
@@ -98,14 +97,14 @@ func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity
 	}
 
 	// Extract semester number from the page.
-	semesterNum, err := session.ElementAttribute(browserInfra.SelKRSSemesterInput, "value")
+	semesterNum, err := session.ElementAttribute(port.SelKRSSemesterInput, "value")
 	if err != nil {
 		return nil, fmt.Errorf("extract semester: %w", err)
 	}
 	slog.Info("KRS semester extracted", "npm", req.NPM, "semester", semesterNum)
 
 	// Download KRS PDF.
-	krsURL := s.cfg.App.LMSBaseURL + browserInfra.KRSDownloadPath + "?nis=" + req.NPM
+	krsURL := s.cfg.App.LMSBaseURL + port.KRSDownloadPath + "?nis=" + req.NPM
 	slog.Info("downloading KRS", "url", krsURL)
 
 	savePath := filepath.Join(s.cfg.App.DownloadDir, req.NPM, "krs", fmt.Sprintf("semester_%s.pdf", semesterNum))
@@ -136,7 +135,7 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 	defer session.Close()
 
 	// Navigate to KHS list page.
-	khsListURL := s.cfg.App.LMSBaseURL + browserInfra.KHSListPath
+	khsListURL := s.cfg.App.LMSBaseURL + port.KHSListPath
 	slog.Info("fetching KHS semesters", "url", khsListURL)
 
 	if err := session.Navigate(khsListURL); err != nil {
@@ -192,7 +191,7 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity.KHSDownloadResult, error) {
 	// Validate semester format.
 	req.Semester = strings.ToUpper(req.Semester)
-	if req.Semester != "GANJIL" && req.Semester != "GENAP" {
+	if !entity.ValidSemester(req.Semester) {
 		return nil, fmt.Errorf("semester must be GANJIL or GENAP")
 	}
 
@@ -204,7 +203,7 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 
 	// Navigate to KHS detail page.
 	detailURL := fmt.Sprintf("%s%s&tahun_ajaran=%s&semester=%s",
-		s.cfg.App.LMSBaseURL, browserInfra.KHSDetailPath, req.TahunAjaran, req.Semester)
+		s.cfg.App.LMSBaseURL, port.KHSDetailPath, req.TahunAjaran, req.Semester)
 	slog.Info("navigating to KHS detail", "url", detailURL)
 
 	if err := session.Navigate(detailURL); err != nil {
@@ -212,7 +211,7 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 	}
 
 	// Find the CETAK KHS button to get the PDF URL.
-	href, err := session.ElementHref(browserInfra.SelKHSCetakBtn)
+	href, err := session.ElementHref(port.SelKHSCetakBtn)
 	if err != nil {
 		return nil, fmt.Errorf("find CETAK KHS button: %w", err)
 	}

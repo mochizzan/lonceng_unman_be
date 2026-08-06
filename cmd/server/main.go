@@ -5,6 +5,8 @@ import (
 
 	"lonceng_unman_be/internal/application/service"
 	"lonceng_unman_be/internal/config"
+	"lonceng_unman_be/internal/domain/entity"
+	"lonceng_unman_be/internal/infrastructure/extractor"
 	"lonceng_unman_be/internal/infrastructure/fibererror"
 	"lonceng_unman_be/internal/infrastructure/logger"
 	"lonceng_unman_be/internal/infrastructure/middleware"
@@ -44,7 +46,9 @@ func main() {
 	healthService := service.NewHealthService(cfg.App)
 	lmsService := service.NewLMSService(cfg, sessionMgr)
 	docService := service.NewLMSDocumentService(cfg, sessionMgr)
-	extractionService := service.NewExtractionService(cfg.App.DownloadDir, cfg.App.ExtractDir, sessionMgr)
+	parser := &parserAdapter{}
+	cache := extractor.NewCacheManager(cfg.App.ExtractDir)
+	extractionService := service.NewExtractionService(cfg.App.DownloadDir, cfg.App.ExtractDir, parser, cache, sessionMgr)
 
 	// Wire HTTP handlers
 	healthHandler := handler.NewHealthHandler(healthService)
@@ -65,4 +69,18 @@ func main() {
 	if err := app.Listen(cfg.Addr()); err != nil {
 		log.Error("server error", "err", err)
 	}
+}
+
+type parserAdapter struct{}
+
+func (a *parserAdapter) ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
+	return extractor.ParseKRS(path, npm)
+}
+
+func (a *parserAdapter) ParseKHS(path string, npm string, tahunAjaran string, semester string) (*entity.KHSExtraction, error) {
+	return extractor.ParseKHS(path, npm, tahunAjaran, semester)
+}
+
+func (a *parserAdapter) MarshalToJSON(v interface{}) ([]byte, error) {
+	return extractor.MarshalJSON(v)
 }

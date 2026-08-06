@@ -1,42 +1,39 @@
 package browser
 
-// CSS selectors for the LMS login and dashboard pages.
-// All selectors confirmed from live DOM inspection and network traffic analysis.
-// Centralized here so changes to the LMS frontend require edits in one place only.
+import "lonceng_unman_be/internal/domain/port"
+
+// Re-export constants from domain/port so infrastructure code that
+// imports this package continues to compile.
 const (
-	// Login form fields (confirmed from LMS HTML)
-	SelUsernameInput = "#username"
-	SelPasswordInput = "input[name='password']"
-	SelSubmitButton  = "input[type='submit']"
+	// Login form fields
+	SelUsernameInput = port.SelUsernameInput
+	SelPasswordInput = port.SelPasswordInput
+	SelSubmitButton  = port.SelSubmitButton
 
-	// Login result indicators (confirmed from network traffic + DOM)
-	// On success: browser redirects to /admin/ which contains .wrapper
-	// On failure: browser stays at / with .alert-danger
-	SelSuccessIndicator = ".wrapper"
-	SelErrorIndicator   = ".alert-danger"
+	// Login result indicators
+	SelSuccessIndicator = port.SelSuccessIndicator
+	SelErrorIndicator   = port.SelErrorIndicator
 
-	// Alternative success indicators (for URL-based detection, not used in Race)
-	SelDashboardHeader  = ".main-header"
-	SelDashboardSidebar = ".main-sidebar"
+	// Alternative success indicators
+	SelDashboardHeader  = port.SelDashboardHeader
+	SelDashboardSidebar = port.SelDashboardSidebar
 
 	// Post-login data extraction
-	SelUserNPM  = ".user-panel .info p" // NPM in sidebar
-	SelUserName = ".user-header p"      // full name in user dropdown
+	SelUserNPM  = port.SelUserNPM
+	SelUserName = port.SelUserName
 
-	// KHS list page (main.php?op=mahasiswa_khs&act=cetak)
-	SelKHSTable = ".table-bordered"
+	// KHS selectors and paths
+	SelKHSTable    = port.SelKHSTable
+	SelKHSCetakBtn = port.SelKHSCetakBtn
 
-	// KHS detail page (main.php?op=mahasiswa_khs&act=cetak_detail)
-	SelKHSCetakBtn = "a[href*='khs_pdf.php']"
-
-	// KRS page (main.php?op=master_mahasiswa&act=konversi_upd_mhs)
-	SelKRSSemesterInput = "input[name='semester']" // semester number input
+	// KRS selectors and paths
+	SelKRSSemesterInput = port.SelKRSSemesterInput
 
 	// KRS URL paths
-	KRSDownloadPath = "/admin/cetak/krs_pdf.php"
-	KRSPagePath     = "/admin/main.php?op=master_mahasiswa&act=konversi_upd_mhs"
+	KRSDownloadPath = port.KRSDownloadPath
+	KRSPagePath     = port.KRSPagePath
 
 	// KHS URL paths
-	KHSListPath   = "/admin/main.php?op=mahasiswa_khs&act=cetak"
-	KHSDetailPath = "/admin/main.php?op=mahasiswa_khs&act=cetak_detail"
+	KHSListPath   = port.KHSListPath
+	KHSDetailPath = port.KHSDetailPath
 )
