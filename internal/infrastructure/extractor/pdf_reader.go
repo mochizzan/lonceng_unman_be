@@ -38,6 +38,9 @@ func ReadPDF(path string) (string, error) {
 		return "", fmt.Errorf("extract text: %w", err)
 	}
 
+	// Normalize: replace raw 0xa0 bytes (non-UTF8 non-breaking space) with regular space
+	text = normalizeText(text)
+
 	if strings.TrimSpace(text) == "" {
 		return "", fmt.Errorf("pdf contains no extractable text (may be image-only)")
 	}
@@ -118,6 +121,9 @@ func ReadPDFWithPosition(path string) ([]PDFRow, error) {
 				continue
 			}
 
+			// Normalize: replace raw 0xa0 bytes (non-UTF8 non-breaking space) with regular space
+			word = normalizeText(word)
+
 			// Flip Y-axis: PDF Y=0 at bottom → screen Y=0 at top
 			flippedY := pageHeight - span.Y
 
@@ -162,6 +168,25 @@ func ReadPDFWithPosition(path string) ([]PDFRow, error) {
 // Using 0.25 instead of 0.5 for better precision with closely spaced lines.
 func roundY(y float64) float64 {
 	return float64(int(y*4)) / 4.0
+}
+
+// normalizeText replaces invalid UTF-8 bytes (like raw 0xa0) with regular spaces.
+// gopdf may return raw bytes that are not valid UTF-8, which Go replaces with U+FFFD.
+// This function proactively replaces them before Go's string processing mangles them.
+func normalizeText(s string) string {
+	var buf []byte
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b == 0xa0 {
+			buf = append(buf, ' ')
+		} else {
+			buf = append(buf, b)
+		}
+	}
+	if buf != nil {
+		return string(buf)
+	}
+	return s
 }
 
 // roundX rounds X position to nearest 0.5 to group characters at same position.
@@ -523,7 +548,14 @@ func isKnownCode(s string) bool {
 }
 
 // parseIntSafe safely parses an integer string.
+// Handles non-breaking spaces (\xa0) which are common in PDF extractions.
 func parseIntSafe(s string) int {
+	s = strings.TrimSpace(s)
+	// Replace non-breaking spaces (U+00A0) and other Unicode whitespace
+	s = strings.NewReplacer(
+		"\u00a0", " ",
+		"\xa0", " ",
+	).Replace(s)
 	s = strings.TrimSpace(s)
 	i, err := strconv.Atoi(s)
 	if err != nil {

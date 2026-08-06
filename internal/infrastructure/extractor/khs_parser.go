@@ -72,31 +72,37 @@ func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*en
 }
 
 // parsePlainTextHeaderKHS extracts header fields from plain text output.
-// The plain text format has label, colon, and value on separate lines.
+// gopdf produces horizontal format: "Label : Value" on one line,
+// while the old library produced vertical format (label/colon/value on separate lines).
+// This function handles both formats.
 func parsePlainTextHeaderKHS(text string, result *entity.KHSExtraction) {
 	lines := strings.Split(text, "\n")
 
-	for i, line := range lines {
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-
-		// Look for Nama field
-		if trimmed == "Nama" {
-			if val := extractNextColonValue(lines, i); val != "" {
-				result.KHS.Mahasiswa.Nama = val
-			}
+		if trimmed == "" {
+			continue
 		}
 
-		// Look for NPM field (handles both "NPM" and "N P M")
-		if trimmed == "NPM" || trimmed == "N P M" {
-			if val := extractNextColonValue(lines, i); val != "" {
-				result.KHS.Mahasiswa.NPM = val
+		// Handle horizontal format: "Label : Value"
+		if strings.Contains(trimmed, ":") {
+			parts := strings.SplitN(trimmed, ":", 2)
+			if len(parts) != 2 {
+				continue
 			}
-		}
+			label := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+			if value == "" {
+				continue
+			}
 
-		// Look for Program Studi field
-		if trimmed == "Program Studi" {
-			if val := extractNextColonValue(lines, i); val != "" {
-				result.KHS.Mahasiswa.ProgramStudi = val
+			switch label {
+			case "Nama":
+				result.KHS.Mahasiswa.Nama = value
+			case "NPM":
+				result.KHS.Mahasiswa.NPM = value
+			case "Program Studi":
+				result.KHS.Mahasiswa.ProgramStudi = value
 			}
 		}
 	}
