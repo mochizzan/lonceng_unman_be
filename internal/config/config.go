@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -33,6 +34,8 @@ type AppConfig struct {
 	// Session Management
 	SessionTTL  time.Duration
 	MaxSessions int
+	// Server Limits
+	MaxBodySize int64
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -63,6 +66,7 @@ func New() (*Config, error) {
 			ExtractDir:      getEnv("EXTRACT_DIR", "./extracted"),
 			SessionTTL:      getEnvDuration("SESSION_TTL", 15*time.Minute),
 			MaxSessions:     getEnvInt("MAX_SESSIONS", 10),
+			MaxBodySize:     parseByteSize(getEnv("MAX_BODY_SIZE", "1MB")),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
@@ -170,6 +174,40 @@ func getEnvInt(key string, fallback int) int {
 	n, err := strconv.Atoi(val)
 	if err != nil {
 		return fallback
+	}
+	return n
+}
+
+// parseByteSize parses a human-readable byte size string (e.g. "1MB", "512KB")
+// into bytes. Supports B, KB, MB, GB suffixes (case-insensitive).
+// Returns 1MB (1048576) on parse failure.
+func parseByteSize(s string) int64 {
+	s = strings.TrimSpace(s)
+	s = strings.ToUpper(s)
+
+	multipliers := map[string]int64{
+		"B":  1,
+		"KB": 1024,
+		"MB": 1024 * 1024,
+		"GB": 1024 * 1024 * 1024,
+	}
+
+	for suffix, mult := range multipliers {
+		if strings.HasSuffix(s, suffix) {
+			numStr := strings.TrimSuffix(s, suffix)
+			numStr = strings.TrimSpace(numStr)
+			n, err := strconv.ParseInt(numStr, 10, 64)
+			if err != nil {
+				return 1024 * 1024 // default 1MB
+			}
+			return n * mult
+		}
+	}
+
+	// Plain number treated as bytes
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 1024 * 1024 // default 1MB
 	}
 	return n
 }
