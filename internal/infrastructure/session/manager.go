@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,8 +38,9 @@ type cachedSession struct {
 // It is safe for concurrent use by multiple goroutines.
 type Manager struct {
 	cfg      *config.Config
-	mu       sync.RWMutex // guards the sessions map
+	mu       sync.RWMutex // guards sessions map only (read/write)
 	sessions map[string]*cachedSession
+	npmLocks sync.Map // map[string]*sync.Mutex, per-NPM lock for session creation
 	ttl      time.Duration
 	stopCh   chan struct{} // signals background cleanup to stop
 }
@@ -60,10 +63,94 @@ func NewManager(cfg *config.Config) *Manager {
 	return m
 }
 
+// getNPMLock returns a per-NPM mutex. Different NPMs can create sessions in parallel.
+func (m *Manager) getNPMLock(npm string) *sync.Mutex {
+	val, _ := m.npmLocks.LoadOrStore(npm, &sync.Mutex{})
+	return val.(*sync.Mutex)
+}
+
+// profileDir returns the Chrome profile directory path for the given NPM.
+func (m *Manager) profileDir(npm string) string {
+	return filepath.Join(m.cfg.App.ProfileBaseDir, npm)
+}
+
+// validateSession checks whether the restored session is still authenticated
+// by navigating to the dashboard URL and checking for dashboard-specific DOM.
+func (m *Manager) validateSession(page *rod.Page) error {
+	page = page.Timeout(m.cfg.App.BrowserTimeout)
+
+	dashboardURL := m.cfg.App.LMSDashboardURL
+	if dashboardURL == "" {
+		dashboardURL = "/admin/"
+	}
+
+	if err := page.Navigate(dashboardURL); err != nil {
+		return fmt.Errorf("navigate to dashboard: %w", err)
+	}
+	if err := page.WaitLoad(); err != nil {
+		return fmt.Errorf("wait dashboard load: %w", err)
+	}
+
+	info, err := page.Info()
+	if err != nil {
+		return fmt.Errorf("get page info: %w", err)
+	}
+	if !strings.Contains(info.URL, "/admin/") {
+		return fmt.Errorf("session expired: redirected to %s", info.URL)
+	}
+
+	if _, err := page.Element(browserInfra.SelSuccessIndicator); err != nil {
+		return fmt.Errorf("session expired: .wrapper not found on %s", info.URL)
+	}
+
+	return nil
+}
+
+// createSessionWithRestore launches Chrome with a restored profile,
+// validates the session, and either returns it or falls back to full login.
+func (m *Manager) createSessionWithRestore(npm, password string, profileDir string) (*cachedSession, error) {
+	if err := m.checkDNS(m.cfg.App.LMSBaseURL); err != nil {
+		return nil, err
+	}
+
+	br := browserInfra.New()
+	if err := br.ConnectWithProfile(m.cfg.App.BrowserHeadless, profileDir); err != nil {
+		slog.Warn("profile launch failed, falling back to full login",
+			"npm", npm, "err", err)
+		return m.createSession(npm, password)
+	}
+
+	page, err := br.Page(m.cfg.App.LMSDashboardURL)
+	if err != nil {
+		_ = br.Close()
+		return m.createSession(npm, password)
+	}
+	if err := page.WaitLoad(); err != nil {
+		_ = br.Close()
+		return m.createSession(npm, password)
+	}
+
+	if err := m.validateSession(page); err != nil {
+		slog.Info("restored session expired, performing full login",
+			"npm", npm, "reason", err.Error())
+		_ = br.Close()
+		return m.createSession(npm, password)
+	}
+
+	slog.Info("restored session validated successfully", "npm", npm)
+	now := time.Now()
+	return &cachedSession{
+		page:      page,
+		browser:   br,
+		createdAt: now,
+		lastUsed:  now,
+	}, nil
+}
+
 // GetOrCreate returns an existing valid session for the NPM,
 // or creates a new one by logging in with the provided credentials.
 func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error) {
-	// Fast path: check if a valid session already exists (read lock only).
+	// Fast path: read-only check (concurrent across all NPMs).
 	m.mu.RLock()
 	sess, ok := m.sessions[npm]
 	m.mu.RUnlock()
@@ -77,12 +164,17 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 		return newSession(sess), nil
 	}
 
-	// Slow path: create a new session (write lock).
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Per-NPM lock: NPM-A does not block NPM-B.
+	npmMu := m.getNPMLock(npm)
+	npmMu.Lock()
+	defer npmMu.Unlock()
 
-	// Double-check after acquiring write lock (another goroutine may have created it).
-	if sess, ok := m.sessions[npm]; ok && time.Since(sess.lastUsed) < m.ttl {
+	// Double-check after acquiring per-NPM lock.
+	m.mu.RLock()
+	sess, ok = m.sessions[npm]
+	m.mu.RUnlock()
+
+	if ok && time.Since(sess.lastUsed) < m.ttl {
 		sess.mu.Lock()
 		sess.lastUsed = time.Now()
 		sess.mu.Unlock()
@@ -91,45 +183,71 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 		return newSession(sess), nil
 	}
 
-	// Evict expired session if exists.
-	if old, ok := m.sessions[npm]; ok {
-		old.mu.Lock()
-		_ = old.browser.Close()
-		old.mu.Unlock()
+	// Evict expired session for this NPM if it exists in map.
+	if ok {
+		sess.mu.Lock()
+		_ = sess.browser.Close()
+		sess.mu.Unlock()
+		m.mu.Lock()
 		delete(m.sessions, npm)
+		m.mu.Unlock()
 	}
 
 	// Enforce max sessions limit.
-	if m.cfg.App.MaxSessions > 0 && len(m.sessions) >= m.cfg.App.MaxSessions {
-		m.evictOldest()
+	if m.cfg.App.MaxSessions > 0 {
+		m.mu.RLock()
+		count := len(m.sessions)
+		m.mu.RUnlock()
+		if count >= m.cfg.App.MaxSessions {
+			m.evictOldest()
+		}
 	}
 
-	// Create new browser and login.
-	slog.Info("creating new session", "npm", npm)
-	sess, err := m.createSession(npm, password)
+	// Try restore from disk before full login.
+	profileDir := m.profileDir(npm)
+	var err error
+	if _, statErr := os.Stat(profileDir); statErr == nil {
+		sess, err = m.createSessionWithRestore(npm, password, profileDir)
+	} else {
+		// No profile on disk — full login.
+		slog.Info("creating new session", "npm", npm)
+		sess, err = m.createSession(npm, password)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	atomic.AddInt32(&sess.activeCount, 1)
+	m.mu.Lock()
 	m.sessions[npm] = sess
+	m.mu.Unlock()
+
+	atomic.AddInt32(&sess.activeCount, 1)
 	return newSession(sess), nil
 }
 
 // Close releases the session for the given NPM.
 func (m *Manager) Close(npm string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	npmMu := m.getNPMLock(npm)
+	npmMu.Lock()
+	defer npmMu.Unlock()
 
-	if sess, ok := m.sessions[npm]; ok {
-		sess.mu.Lock()
-		err := sess.browser.Close()
-		sess.mu.Unlock()
-		delete(m.sessions, npm)
-		slog.Info("session closed", "npm", npm)
-		return err
+	m.mu.RLock()
+	sess, ok := m.sessions[npm]
+	m.mu.RUnlock()
+	if !ok {
+		return nil
 	}
-	return nil
+
+	sess.mu.Lock()
+	err := sess.browser.Close()
+	sess.mu.Unlock()
+
+	m.mu.Lock()
+	delete(m.sessions, npm)
+	m.mu.Unlock()
+
+	slog.Info("session closed", "npm", npm)
+	return err
 }
 
 // CloseAll releases all cached sessions.
@@ -296,27 +414,40 @@ func (m *Manager) login(page *rod.Page, npm, password string) error {
 // evictOldest closes and removes the session with the oldest lastUsed time,
 // skipping any session that is currently in active use.
 func (m *Manager) evictOldest() {
+	m.mu.RLock()
 	var oldestNPM string
 	var oldestTime time.Time
-
 	for npm, sess := range m.sessions {
 		if atomic.LoadInt32(&sess.activeCount) > 0 {
-			continue // don't evict active sessions
+			continue
 		}
 		if oldestNPM == "" || sess.lastUsed.Before(oldestTime) {
 			oldestNPM = npm
 			oldestTime = sess.lastUsed
 		}
 	}
+	m.mu.RUnlock()
 
-	if oldestNPM != "" {
-		sess := m.sessions[oldestNPM]
-		sess.mu.Lock()
-		_ = sess.browser.Close()
-		sess.mu.Unlock()
-		delete(m.sessions, oldestNPM)
-		slog.Info("evicted oldest session", "npm", oldestNPM)
+	if oldestNPM == "" {
+		return
 	}
+
+	m.mu.RLock()
+	sess, ok := m.sessions[oldestNPM]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	sess.mu.Lock()
+	_ = sess.browser.Close()
+	sess.mu.Unlock()
+
+	m.mu.Lock()
+	delete(m.sessions, oldestNPM)
+	m.mu.Unlock()
+
+	slog.Info("evicted oldest session", "npm", oldestNPM)
 }
 
 // cleanupLoop periodically evicts expired sessions.
@@ -337,21 +468,38 @@ func (m *Manager) cleanupLoop() {
 // cleanup removes all sessions that have exceeded the TTL.
 // Sessions with active users (activeCount > 0) are skipped.
 func (m *Manager) cleanup() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	// Step 1: Find expired sessions under read lock (fast).
+	m.mu.RLock()
 	now := time.Now()
+	var toEvict []string
 	for npm, sess := range m.sessions {
 		if now.Sub(sess.lastUsed) > m.ttl {
 			if atomic.LoadInt32(&sess.activeCount) > 0 {
 				slog.Info("session expired but still active, skipping", "npm", npm)
 				continue
 			}
-			sess.mu.Lock()
-			_ = sess.browser.Close()
-			sess.mu.Unlock()
-			delete(m.sessions, npm)
-			slog.Info("session expired and evicted", "npm", npm)
+			toEvict = append(toEvict, npm)
 		}
+	}
+	m.mu.RUnlock()
+
+	// Step 2: Close each expired session (outside of m.mu).
+	for _, npm := range toEvict {
+		m.mu.RLock()
+		sess, ok := m.sessions[npm]
+		m.mu.RUnlock()
+		if !ok {
+			continue
+		}
+
+		sess.mu.Lock()
+		_ = sess.browser.Close()
+		sess.mu.Unlock()
+
+		m.mu.Lock()
+		delete(m.sessions, npm)
+		m.mu.Unlock()
+
+		slog.Info("session expired and evicted", "npm", npm)
 	}
 }
