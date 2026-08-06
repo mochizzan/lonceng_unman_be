@@ -9,20 +9,27 @@ import (
 )
 
 // ParseKRS extracts structured KRS data from a PDF file.
+// It uses ReadPDF (plain text) for header fields to preserve word spacing,
+// and ReadPDFWithPosition for table data that needs column positions.
 func ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
+	result := &entity.KRSExtraction{}
+	result.KRS.Mahasiswa.NPM = npm
+
+	// Use plain text for header fields (preserves spaces)
+	plainText, err := ReadPDF(path)
+	if err == nil {
+		parsePlainTextHeaderKRS(plainText, result)
+	}
+
+	// Use position-based extraction for table data
 	rows, err := ReadPDFWithPosition(path)
 	if err != nil {
 		return nil, fmt.Errorf("read pdf: %w", err)
 	}
 
-	result := &entity.KRSExtraction{}
-	result.KRS.Mahasiswa.NPM = npm
-
-	// Extract all lines for section detection
 	lines := RowsToLines(rows)
 
-	// Parse sections
-	parseKRSHeader(lines, result)
+	// Parse table and other sections
 	parseKRSMataKuliah(rows, lines, result)
 	parseKRSPenerbitan(lines, result)
 	parseKRSPersetujuan(lines, result)
@@ -62,6 +69,91 @@ func NormalizeLabel(s string) string {
 // isLowerLetter checks if a rune is a lowercase Latin letter.
 func isLowerLetter(r rune) bool {
 	return r >= 'a' && r <= 'z'
+}
+
+// parsePlainTextHeaderKRS extracts header fields from plain text output.
+// The plain text format has label, colon, and value on separate lines:
+//
+//	Nama
+//	:
+//	MOCHAMAD IZZAN FIRASYANSYAH
+func parsePlainTextHeaderKRS(text string, result *entity.KRSExtraction) {
+	lines := strings.Split(text, "\n")
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Look for Nama field
+		if trimmed == "Nama" {
+			if val := extractNextColonValue(lines, i); val != "" {
+				result.KRS.Mahasiswa.Nama = val
+			}
+		}
+
+		// Look for NPM field (handles both "NPM" and "N P M")
+		if trimmed == "NPM" || trimmed == "N P M" {
+			if val := extractNextColonValue(lines, i); val != "" {
+				result.KRS.Mahasiswa.NPM = val
+			}
+		}
+
+		// Look for Program Studi field
+		if trimmed == "Program Studi" {
+			if val := extractNextColonValue(lines, i); val != "" {
+				result.KRS.Mahasiswa.ProgramStudi = val
+			}
+		}
+
+		// Look for Tahun Ajaran field
+		if trimmed == "Tahun Ajaran" {
+			if val := extractNextColonValue(lines, i); val != "" {
+				result.KRS.Periode.TahunAjaran = val
+			}
+		}
+
+		// Look for Semester field
+		if trimmed == "Semester" {
+			if val := extractNextColonValue(lines, i); val != "" {
+				result.KRS.Periode.Semester = val
+			}
+		}
+	}
+}
+
+// extractNextColonValue looks for ":" in the next few lines and returns the value after it.
+// Handles formats:
+//   - "Label\n:\nValue" (colon on its own line)
+//   - "Label: Value" (colon on same line as label)
+//   - "Label\n: Value" (colon on next line with value)
+func extractNextColonValue(lines []string, startIdx int) string {
+	// First check if the current line has colon with value
+	currentLine := strings.TrimSpace(lines[startIdx])
+	if strings.Contains(currentLine, ":") {
+		parts := strings.SplitN(currentLine, ":", 2)
+		if len(parts) == 2 {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+
+	// Look in next few lines for colon
+	for j := startIdx + 1; j < len(lines) && j < startIdx+4; j++ {
+		trimmed := strings.TrimSpace(lines[j])
+
+		// Case 1: Line is just ":" → value is on the next line
+		if trimmed == ":" {
+			if j+1 < len(lines) {
+				return strings.TrimSpace(lines[j+1])
+			}
+			return ""
+		}
+
+		// Case 2: Line starts with ":" → value is after the colon
+		if strings.HasPrefix(trimmed, ":") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, ":"))
+		}
+	}
+
+	return ""
 }
 
 // IsUpperLetter checks if a rune is an uppercase Latin letter.

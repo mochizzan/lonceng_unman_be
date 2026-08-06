@@ -9,22 +9,29 @@ import (
 )
 
 // ParseKHS extracts structured KHS data from a PDF file.
+// It uses ReadPDF (plain text) for header fields to preserve word spacing,
+// and ReadPDFWithPosition for table data that needs column positions.
 func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*entity.KHSExtraction, error) {
-	rows, err := ReadPDFWithPosition(path)
-	if err != nil {
-		return nil, fmt.Errorf("read pdf: %w", err)
-	}
-
 	result := &entity.KHSExtraction{}
 	result.KHS.Mahasiswa.NPM = npm
 	result.KHS.Periode.TahunAjaran = tahunAjaran
 	result.KHS.Periode.Semester = semester
 
-	// Extract all lines for section detection
+	// Use plain text for header fields (preserves spaces)
+	plainText, err := ReadPDF(path)
+	if err == nil {
+		parsePlainTextHeaderKHS(plainText, result)
+	}
+
+	// Use position-based extraction for table data
+	rows, err := ReadPDFWithPosition(path)
+	if err != nil {
+		return nil, fmt.Errorf("read pdf: %w", err)
+	}
+
 	lines := RowsToLines(rows)
 
-	// Parse sections
-	parseKHSHeader(lines, result)
+	// Parse table and other sections
 	parseKHSMataKuliah(rows, lines, result)
 	parseKHSRekapitulasi(lines, result)
 	parseKHSPenerbitan(lines, result)
@@ -77,6 +84,37 @@ func parseKHSHeader(lines []string, result *entity.KHSExtraction) {
 					result.KHS.Mahasiswa.ProgramStudi = strings.TrimSpace(parts[1])
 				}
 			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KHS.Mahasiswa.ProgramStudi = val
+			}
+		}
+	}
+}
+
+// parsePlainTextHeaderKHS extracts header fields from plain text output.
+// The plain text format has label, colon, and value on separate lines.
+func parsePlainTextHeaderKHS(text string, result *entity.KHSExtraction) {
+	lines := strings.Split(text, "\n")
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Look for Nama field
+		if trimmed == "Nama" {
+			if val := extractNextColonValue(lines, i); val != "" {
+				result.KHS.Mahasiswa.Nama = val
+			}
+		}
+
+		// Look for NPM field (handles both "NPM" and "N P M")
+		if trimmed == "NPM" || trimmed == "N P M" {
+			if val := extractNextColonValue(lines, i); val != "" {
+				result.KHS.Mahasiswa.NPM = val
+			}
+		}
+
+		// Look for Program Studi field
+		if trimmed == "Program Studi" {
+			if val := extractNextColonValue(lines, i); val != "" {
 				result.KHS.Mahasiswa.ProgramStudi = val
 			}
 		}
