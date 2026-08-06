@@ -660,6 +660,52 @@ Content-Type: application/json
 }
 ```
 
+**Response 400 Bad Request — Missing NPM:**
+
+```json
+{
+  "status": "error",
+  "message": "npm is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — Missing Password:**
+
+```json
+{
+  "status": "error",
+  "message": "password is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 404 Not Found — PDF Not Found:**
+
+```json
+{
+  "status": "error",
+  "message": "KRS PDF not found for npm: 2211700006",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Returns 404 when no KRS PDF file exists for the given NPM.
+> Possible causes: PDF was never downloaded or file was deleted.
+
+**Response 500 Internal Server Error — Extraction Failed:**
+
+```json
+{
+  "status": "error",
+  "message": "KRS extraction failed",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Internal error details are logged server-side, not exposed to client.
+> Possible causes: PDF corrupted, PDF empty, PDF too large (>50MB), or parse error.
+
 **Example curl:**
 
 ```bash
@@ -713,6 +759,72 @@ Content-Type: application/json
 }
 ```
 
+**Response 400 Bad Request — Missing NPM:**
+
+```json
+{
+  "status": "error",
+  "message": "npm is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — Missing Password:**
+
+```json
+{
+  "status": "error",
+  "message": "password is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — Missing Tahun Ajaran:**
+
+```json
+{
+  "status": "error",
+  "message": "tahun_ajaran is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — Missing Semester:**
+
+```json
+{
+  "status": "error",
+  "message": "semester is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 404 Not Found — PDF Not Found:**
+
+```json
+{
+  "status": "error",
+  "message": "KHS PDF not found",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Returns 404 when no KHS PDF file exists for the given NPM/tahun_ajaran/semester.
+> Possible causes: PDF was never downloaded or file was deleted.
+
+**Response 500 Internal Server Error — Extraction Failed:**
+
+```json
+{
+  "status": "error",
+  "message": "KHS extraction failed",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Internal error details are logged server-side, not exposed to client.
+> Possible causes: PDF corrupted, PDF empty, PDF too large (>50MB), or parse error.
+
 **Example curl:**
 
 ```bash
@@ -763,6 +875,39 @@ GET /api/v1/lms/krs/data/:npm
     }
   },
   "message": "KRS data retrieved"
+}
+```
+
+**Response 400 Bad Request — Missing NPM:**
+
+```json
+{
+  "status": "error",
+  "message": "npm is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 404 Not Found — Extraction Data Not Found:**
+
+```json
+{
+  "status": "error",
+  "message": "extraction data not found",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Returns 404 when no cached extraction exists for the given NPM.
+> Call POST `/api/v1/lms/krs/extract` first to create extraction data.
+
+**Response 500 Internal Server Error — Read Failed:**
+
+```json
+{
+  "status": "error",
+  "message": "failed to read extraction data",
+  "trace_id": "abc123..."
 }
 ```
 
@@ -823,6 +968,49 @@ GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
 }
 ```
 
+**Response 400 Bad Request — Missing Tahun Ajaran:**
+
+```json
+{
+  "status": "error",
+  "message": "tahun_ajaran is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 400 Bad Request — Missing Semester:**
+
+```json
+{
+  "status": "error",
+  "message": "semester is required",
+  "trace_id": "abc123..."
+}
+```
+
+**Response 404 Not Found — Extraction Data Not Found:**
+
+```json
+{
+  "status": "error",
+  "message": "extraction data not found",
+  "trace_id": "abc123..."
+}
+```
+
+> **Note:** Returns 404 when no cached extraction exists for the given NPM/tahun_ajaran/semester.
+> Call POST `/api/v1/lms/khs/extract` first to create extraction data.
+
+**Response 500 Internal Server Error — Read Failed:**
+
+```json
+{
+  "status": "error",
+  "message": "failed to read extraction data",
+  "trace_id": "abc123..."
+}
+```
+
 **Example curl:**
 
 ```bash
@@ -836,8 +1024,20 @@ curl http://localhost:3000/api/v1/lms/khs/data/2211700006/2022/2023/GENAP
 | HTTP Status | Constructor | When |
 |-------------|-------------|------|
 | 400 | `apperror.BadRequest(msg)` | Invalid request (body parse error, missing fields) |
-| 404 | `apperror.NotFound(msg)` | Endpoint not found |
-| 500 | `apperror.Internal(msg, err)` | Infrastructure failure (browser crash, page load error) |
+| 404 | `apperror.NotFound(msg)` | Resource not found (PDF missing, extraction data not found) |
+| 500 | `apperror.Internal(msg, err)` | Infrastructure failure (browser crash, page load error, PDF corrupted) |
+
+### Extraction-Specific Errors
+
+| HTTP Status | Scenario | Message Pattern |
+|-------------|----------|------------------|
+| 404 | KRS PDF not found | `KRS PDF not found for npm: {npm}` |
+| 404 | KHS PDF not found | `KHS PDF not found` |
+| 404 | Extraction data not found | `extraction data not found` |
+| 500 | PDF corrupted | `pdf file may be corrupted` |
+| 500 | PDF empty | `pdf contains no extractable text` |
+| 500 | PDF too large | `pdf too large: {size} bytes` |
+| 500 | Parse error | `pdf parsing failed: {detail}` |
 
 ---
 
@@ -866,3 +1066,4 @@ curl http://localhost:3000/api/v1/lms/khs/data/2211700006/2022/2023/GENAP
 - Go 1.26.4+
 - Chrome/Chromium installed (for LMS login)
 - go-rod v0.116.2 (auto-installed via `go mod tidy`)
+- ledongthuc/pdf v0.4.1 (auto-installed via `go mod tidy`)
