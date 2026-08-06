@@ -60,7 +60,7 @@ func New() (*Config, error) {
 			LMSBaseURL:      getEnv("LMS_BASE_URL", "https://elearning.universitasmandiri.ac.id"),
 			LMSDashboardURL: getEnv("LMS_DASHBOARD_URL", "https://elearning.universitasmandiri.ac.id/admin/"),
 			BrowserHeadless: getEnvBool("BROWSER_HEADLESS", true),
-			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 30*time.Second),
+			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 60*time.Second),
 			ActionTimeout:   getEnvDuration("ACTION_TIMEOUT", 10*time.Second),
 			DownloadDir:     getEnv("DOWNLOAD_DIR", "./downloads"),
 			ExtractDir:      getEnv("EXTRACT_DIR", "./extracted"),
