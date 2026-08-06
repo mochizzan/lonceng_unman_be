@@ -224,7 +224,7 @@ GET /api/v1/lms/krs?npm=xxx
     "success": true,
     "message": "KRS downloaded successfully",
     "npm": "2211700006",
-    "file_path": "downloads/2211700006/krs/krs.pdf",
+    "file_path": "downloads/2211700006/krs/semester_8.pdf",
     "size": 12345,
     "timestamp": "2026-08-06T00:45:00+07:00"
   },
@@ -280,7 +280,7 @@ curl "http://localhost:3000/api/v1/lms/krs?npm=2211700006"
 **Lokasi File Tersimpan:**
 
 ```
-downloads/2211700006/krs/krs.pdf
+downloads/2211700006/krs/semester_8.pdf
 ```
 
 > **Catatan:** File KRS selalu disimpan sebagai `krs.pdf` dan di-overwrite jika sudah ada.
@@ -496,7 +496,7 @@ Semua file PDF disimpan di bawah `{DOWNLOAD_DIR}/{NPM}/` dengan nama canonical:
 downloads/
 ├── {NPM}/
 │   ├── krs/
-│   │   └── krs.pdf                    # KRS (selalu overwritten)
+│   │   └── semester_{N}.pdf           # KHS per semester (N = nomor semester)
 │   └── khs/
 │       ├── 2022_2023_GANJIL.pdf        # KHS per semester
 │       ├── 2022_2023_GENAP.pdf
@@ -504,7 +504,7 @@ downloads/
 ```
 
 **Aturan Penamaan:**
-- KRS: `{downloadDir}/{npm}/krs/krs.pdf` (overwritten setiap download)
+- KRS: `{downloadDir}/{npm}/krs/semester_{N}.pdf` (N = nomor semester mahasiswa)
 - KHS: `{downloadDir}/{npm}/khs/{tahun_ajaran}_{semester}.pdf`
 - `tahun_ajaran`: `/` diganti `_` (contoh: `2022/2023` → `2022_2023`)
 
