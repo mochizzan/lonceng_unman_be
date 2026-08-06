@@ -1,8 +1,8 @@
 package browser
 
 import (
-	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +10,8 @@ import (
 	"github.com/go-rod/rod"
 )
 
-// DownloadAndSave downloads a PDF from the given URL using JavaScript fetch(),
-// bypassing Chromium's PDF download behavior. Saves to savePath.
+// DownloadAndSave downloads a PDF from the given URL using go-rod's native
+// download mechanism (CDP Browser.setDownloadBehavior) and saves to savePath.
 // Returns the filename, byte count, and any error.
 func DownloadAndSave(page *rod.Page, url string, savePath string) (string, int, error) {
 	dir := filepath.Dir(savePath)
@@ -19,48 +19,65 @@ func DownloadAndSave(page *rod.Page, url string, savePath string) (string, int, 
 		return "", 0, fmt.Errorf("create save dir: %w", err)
 	}
 
-	// Use async fetch() to download the PDF content.
-	// go-rod's Eval wraps the code in: function() { return (CODE).apply(this, arguments) }
-	// So we pass an async function expression directly — NOT an IIFE.
-	// The wrapper calls it with .apply(), and Eval's AwaitPromise waits for the result.
+	// Set up native download listener before triggering the download.
+	// go-rod saves the file as filepath.Join(dir, info.GUID).
+	wait := page.Browser().WaitDownload(dir)
+
+	// Trigger the download via a hidden <a download> click.
+	// This preserves the page's session cookies for authenticated URLs.
 	jsCode := fmt.Sprintf(`async function() {
-		const response = await fetch("%s", { credentials: "include" });
-		if (!response.ok) {
-			throw new Error("HTTP " + response.status + " " + response.statusText);
-		}
-		const contentType = response.headers.get("content-type");
-		if (!contentType || !contentType.includes("application/pdf")) {
-			throw new Error("Expected PDF but got: " + contentType);
-		}
-		const buffer = await response.arrayBuffer();
-		const bytes = new Uint8Array(buffer);
-		let binary = "";
-		for (let i = 0; i < bytes.byteLength; i++) {
-			binary += String.fromCharCode(bytes[i]);
-		}
-		return btoa(binary);
+		const a = document.createElement('a');
+		a.href = %q;
+		a.download = '';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
 	}`, url)
 
-	result, err := page.Eval(jsCode)
+	if _, err := page.Eval(jsCode); err != nil {
+		return "", 0, fmt.Errorf("trigger download: %w", err)
+	}
+
+	// Block until the browser finishes writing the file to disk.
+	info := wait()
+
+	downloadedPath := filepath.Join(dir, info.GUID)
+
+	// Move to desired path; fall back to copy if rename fails (cross-device).
+	if err := os.Rename(downloadedPath, savePath); err != nil {
+		if err := copyFile(downloadedPath, savePath); err != nil {
+			return "", 0, err
+		}
+		os.Remove(downloadedPath)
+	}
+
+	fileInfo, err := os.Stat(savePath)
 	if err != nil {
-		return "", 0, fmt.Errorf("fetch PDF via JS: %w", err)
+		return "", 0, fmt.Errorf("stat file: %w", err)
 	}
 
-	// Decode base64 to bytes.
-	pdfBody, err := base64.StdEncoding.DecodeString(result.Value.Str())
+	return filepath.Base(savePath), int(fileInfo.Size()), nil
+}
+
+// copyFile copies src to dst. Used as a fallback when os.Rename fails
+// (e.g. across filesystem boundaries).
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
 	if err != nil {
-		return "", 0, fmt.Errorf("decode PDF body: %w", err)
+		return fmt.Errorf("open source file: %w", err)
 	}
+	defer srcFile.Close()
 
-	if len(pdfBody) == 0 {
-		return "", 0, fmt.Errorf("downloaded file is empty")
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("create destination file: %w", err)
 	}
+	defer dstFile.Close()
 
-	if err := os.WriteFile(savePath, pdfBody, 0o644); err != nil {
-		return "", 0, fmt.Errorf("save PDF: %w", err)
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("copy file: %w", err)
 	}
-
-	return filepath.Base(savePath), len(pdfBody), nil
+	return nil
 }
 
 // BuildKHSPath builds the canonical save path for a KHS PDF.

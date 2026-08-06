@@ -18,8 +18,8 @@ type BrowserSession interface {
 	// ElementHref returns the href attribute of the first element matching the selector.
 	ElementHref(selector string) (string, error)
 
-	// DownloadPDF downloads a PDF from the given URL using JavaScript fetch()
-	// and saves it to savePath. Returns the filename and byte count.
+	// DownloadPDF downloads a PDF from the given URL and saves it to savePath.
+	// Returns the filename and byte count.
 	DownloadPDF(url, savePath string) (string, int, error)
 
 	// Close releases the browser session resources.
