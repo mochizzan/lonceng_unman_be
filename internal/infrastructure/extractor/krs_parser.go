@@ -459,13 +459,28 @@ func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtract
 
 // findScheduleNearRow searches rows near the given index for schedule information.
 // Schedule data might be split across multiple rows (day on one row, time on another).
+// Uses column boundaries to only look at the JADWAL column's X range,
+// preventing cross-contamination from other columns or courses.
 func findScheduleNearRow(rows []PDFRow, courseIdx int, boundaries []ColumnBoundary) entity.KRSJadwal {
-	// Search in a window of ±3 rows around the course row
-	start := courseIdx - 3
+	// Find JADWAL column boundaries
+	var jadwalStart, jadwalEnd float64
+	for _, b := range boundaries {
+		if b.Name == "JADWAL" {
+			jadwalStart = b.Start
+			jadwalEnd = b.End
+			break
+		}
+	}
+	if jadwalEnd == 0 {
+		return entity.KRSJadwal{}
+	}
+
+	// Search in a window of ±2 rows around the course row
+	start := courseIdx - 2
 	if start < 0 {
 		start = 0
 	}
-	end := courseIdx + 4
+	end := courseIdx + 3
 	if end > len(rows) {
 		end = len(rows)
 	}
@@ -477,11 +492,31 @@ func findScheduleNearRow(rows []PDFRow, courseIdx int, boundaries []ColumnBounda
 		if i == courseIdx {
 			continue
 		}
-		line := RowToLine(rows[i])
+
+		// Only consider words within the JADWAL column's X range
+		var jadwalWords []PDFWord
+		for _, w := range rows[i].Words {
+			if w.X >= jadwalStart && w.X < jadwalEnd {
+				jadwalWords = append(jadwalWords, w)
+			}
+		}
+		if len(jadwalWords) == 0 {
+			continue
+		}
+
+		// Reconstruct the line from jadwal-column words only
+		line := ""
+		for _, w := range jadwalWords {
+			if line != "" {
+				line += " "
+			}
+			line += w.Text
+		}
+		line = strings.TrimSpace(line)
+
 		if isIndonesianDay(line) {
 			dayLine = line
 		}
-		// Check for time pattern HH:MM
 		if strings.Contains(line, ":") && len(line) >= 5 {
 			for _, part := range strings.Fields(line) {
 				if isValidTime(part) {

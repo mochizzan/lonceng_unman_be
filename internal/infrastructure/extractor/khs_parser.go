@@ -251,33 +251,44 @@ func parseKHSRekapitulasi(lines []string, result *entity.KHSExtraction) {
 }
 
 // parseKHSPenerbitan extracts publication info from KHS.
-// Handles Indonesian date formats: "6 Agustus 2026", "06 Agustus 2026"
+// Handles formats: "Subang, 06 Agustus 2026", "Dikeluarkan di Subang, 06 Agustus 2026"
 func parseKHSPenerbitan(lines []string, result *entity.KHSExtraction) {
 	for _, line := range lines {
-		normalized := NormalizeLabel(line)
-		// Look for "Dikeluarkan di" pattern
-		if strings.Contains(normalized, "Dikeluarkan di") || strings.Contains(normalized, "dikeluarkan di") {
-			parts := strings.SplitN(line, ",", 2)
-			if len(parts) == 2 {
-				result.KHS.Penerbitan.Tempat = strings.TrimSpace(parts[0])
-				dateStr := strings.TrimSpace(parts[1])
+		if !strings.Contains(line, ",") {
+			continue
+		}
 
-				// Try Indonesian date format first
-				for indo, eng := range indonesianMonthsKHS {
-					if strings.Contains(dateStr, indo) {
-						dateStr = strings.Replace(dateStr, indo, eng, 1)
-						break
-					}
-				}
+		parts := strings.SplitN(line, ",", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		tempat := strings.TrimSpace(parts[0])
+		dateStr := strings.TrimSpace(parts[1])
 
-				// Try multiple date formats
-				for _, format := range dateFormatsKHS {
-					if t, err := time.Parse(format, dateStr); err == nil {
-						result.KHS.Penerbitan.Tanggal = t.Format(dateOutputFormatKHS)
-						break
-					}
-				}
+		// Check if the second part contains a month name (Indonesian)
+		monthFound := false
+		for indo, eng := range indonesianMonthsKHS {
+			if strings.Contains(dateStr, indo) {
+				dateStr = strings.Replace(dateStr, indo, eng, 1)
+				monthFound = true
+				break
 			}
+		}
+		if !monthFound {
+			continue
+		}
+
+		// Try to parse the date
+		for _, format := range dateFormatsKHS {
+			if t, err := time.Parse(format, dateStr); err == nil {
+				result.KHS.Penerbitan.Tempat = tempat
+				result.KHS.Penerbitan.Tanggal = t.Format(dateOutputFormatKHS)
+				break
+			}
+		}
+
+		if result.KHS.Penerbitan.Tempat != "" && result.KHS.Penerbitan.Tanggal != "" {
+			break
 		}
 	}
 }
