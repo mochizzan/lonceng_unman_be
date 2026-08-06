@@ -9,122 +9,50 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/proto"
 )
 
-// DownloadAndSave navigates to a URL, intercepts the PDF response via CDP Fetch domain,
-// and saves it to savePath. Returns the filename, byte count, and any error.
-// If savePath already exists it is overwritten.
-// Uses Fetch.enable to intercept PDF responses before Chromium aborts navigation.
+// DownloadAndSave downloads a PDF from the given URL using JavaScript fetch(),
+// bypassing Chromium's PDF download behavior. Saves to savePath.
+// Returns the filename, byte count, and any error.
 func DownloadAndSave(page *rod.Page, url string, savePath string, timeout time.Duration) (string, int, error) {
 	dir := filepath.Dir(savePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", 0, fmt.Errorf("create save dir: %w", err)
 	}
 
-	// Enable Fetch domain to intercept PDF responses.
-	enableParams := proto.FetchEnable{
-		Patterns: []*proto.FetchRequestPattern{{
-			RequestStage: proto.FetchRequestStageResponse,
-		}},
-	}
-	if err := enableParams.Call(page); err != nil {
-		return "", 0, fmt.Errorf("enable fetch domain: %w", err)
-	}
-
-	var (
-		pdfBody    []byte
-		pdfReady   = make(chan bool, 1)
-		fetchError error
-	)
-
-	// Listen for Fetch.requestPaused events.
-	// When a PDF response is intercepted, retrieve its body and fulfill the request.
-	go page.EachEvent(
-		func(e *proto.FetchRequestPaused) {
-			// Check if this is a successful response.
-			if e.ResponseStatusCode == nil || *e.ResponseStatusCode != 200 {
-				contReq := proto.FetchContinueRequest{RequestID: e.RequestID}
-				if err := contReq.Call(page); err != nil {
-					fetchError = fmt.Errorf("continue request: %w", err)
-				}
-				return
+	// Use JavaScript fetch() to download the PDF content.
+	// This avoids Chromium's net::ERR_ABORTED when navigating to PDF URLs.
+	jsCode := fmt.Sprintf(`
+		(async () => {
+			const response = await fetch("%s", {
+				credentials: 'include'
+			});
+			if (!response.ok) {
+				throw new Error("HTTP " + response.status + " " + response.statusText);
 			}
-
-			// Check content-type header for PDF.
-			isPDF := false
-			if e.ResponseHeaders != nil {
-				for _, h := range e.ResponseHeaders {
-					if h.Name == "content-type" && strings.Contains(h.Value, "application/pdf") {
-						isPDF = true
-						break
-					}
-				}
+			const contentType = response.headers.get("content-type");
+			if (!contentType || !contentType.includes("application/pdf")) {
+				throw new Error("Expected PDF but got: " + contentType);
 			}
-
-			if !isPDF {
-				// Not a PDF, continue normally.
-				contReq := proto.FetchContinueRequest{RequestID: e.RequestID}
-				if err := contReq.Call(page); err != nil {
-					fetchError = fmt.Errorf("continue request: %w", err)
-				}
-				return
+			const buffer = await response.arrayBuffer();
+			const bytes = new Uint8Array(buffer);
+			let binary = "";
+			for (let i = 0; i < bytes.byteLength; i++) {
+				binary += String.fromCharCode(bytes[i]);
 			}
+			return btoa(binary);
+		})()
+	`, url)
 
-			// It's a PDF — get the response body before fulfilling.
-			bodyReq := proto.FetchGetResponseBody{RequestID: e.RequestID}
-			res, err := bodyReq.Call(page)
-			if err != nil {
-				fetchError = fmt.Errorf("get fetch response body: %w", err)
-				// Fail the request so browser doesn't hang.
-				failReq := proto.FetchFailRequest{RequestID: e.RequestID}
-				_ = failReq.Call(page)
-				pdfReady <- true
-				return
-			}
-
-			// Decode the body.
-			if res.Base64Encoded {
-				pdfBody, err = base64.StdEncoding.DecodeString(res.Body)
-			} else {
-				pdfBody = []byte(res.Body)
-			}
-			if err != nil {
-				fetchError = fmt.Errorf("decode PDF body: %w", err)
-			}
-
-			// Fulfill the request with the original response.
-			fulfillReq := proto.FetchFulfillRequest{
-				RequestID:       e.RequestID,
-				ResponseCode:    200,
-				ResponseHeaders: e.ResponseHeaders,
-				Body:            pdfBody,
-			}
-			if err := fulfillReq.Call(page); err != nil {
-				fetchError = fmt.Errorf("fulfill request: %w", err)
-			}
-
-			pdfReady <- true
-		},
-	)()
-
-	// Navigate to the PDF URL.
-	if err := page.Navigate(url); err != nil {
-		return "", 0, fmt.Errorf("navigate to PDF URL: %w", err)
+	result, err := page.Eval(jsCode)
+	if err != nil {
+		return "", 0, fmt.Errorf("fetch PDF via JS: %w", err)
 	}
 
-	// Wait for the PDF body to be captured, or time out.
-	select {
-	case <-pdfReady:
-	case <-time.After(timeout):
-		return "", 0, fmt.Errorf("download timed out after %v", timeout)
-	}
-
-	// Disable Fetch domain.
-	_ = proto.FetchDisable{}.Call(page)
-
-	if fetchError != nil {
-		return "", 0, fetchError
+	// Decode base64 to bytes.
+	pdfBody, err := base64.StdEncoding.DecodeString(result.Value.Str())
+	if err != nil {
+		return "", 0, fmt.Errorf("decode PDF body: %w", err)
 	}
 
 	if len(pdfBody) == 0 {
