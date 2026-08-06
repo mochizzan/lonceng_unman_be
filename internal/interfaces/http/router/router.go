@@ -24,6 +24,6 @@ func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *han
 	// Extraction
 	v1.Post("/lms/krs/extract", extractionHandler.ExtractKRS)
 	v1.Post("/lms/khs/extract", extractionHandler.ExtractKHS)
-	v1.Get("/lms/krs/data/:npm", extractionHandler.GetKRS)
-	v1.Get("/lms/khs/data/:npm/:tahun_ajaran/:semester", extractionHandler.GetKHS)
+	v1.Post("/lms/krs/data", extractionHandler.GetKRS)
+	v1.Post("/lms/khs/data", extractionHandler.GetKHS)
 }

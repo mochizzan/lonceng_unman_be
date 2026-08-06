@@ -46,6 +46,18 @@ type KHSExtractionRequest struct {
 	Semester    string `json:"semester"`
 }
 
+// KRSDataRequest represents the request body for retrieving cached KRS data.
+type KRSDataRequest struct {
+	NPM string `json:"npm"`
+}
+
+// KHSDataRequest represents the request body for retrieving cached KHS data.
+type KHSDataRequest struct {
+	NPM         string `json:"npm"`
+	TahunAjaran string `json:"tahun_ajaran"`
+	Semester    string `json:"semester"`
+}
+
 // ExtractKRS handles POST /api/v1/lms/krs/extract
 // Always re-extracts and overwrites existing cache.
 func (h *ExtractionHandler) ExtractKRS(c fiber.Ctx) error {
@@ -120,17 +132,21 @@ func (h *ExtractionHandler) ExtractKHS(c fiber.Ctx) error {
 	return response.Success(c, fiber.StatusOK, resp, "KHS extracted successfully")
 }
 
-// GetKRS handles GET /api/v1/lms/krs/data/:npm
+// GetKRS handles POST /api/v1/lms/krs/data
 func (h *ExtractionHandler) GetKRS(c fiber.Ctx) error {
-	npm := c.Params("npm")
-	if err := validateNPM(npm); err != nil {
+	var req KRSDataRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return apperror.BadRequest("invalid request body")
+	}
+
+	if err := validateNPM(req.NPM); err != nil {
 		return err
 	}
 
-	data, err := h.extractionSvc.GetKRSExtraction(npm)
+	data, err := h.extractionSvc.GetKRSExtraction(req.NPM)
 	if err != nil {
 		if errors.Is(err, apperror.ErrExtractionNotFound) || errors.Is(err, os.ErrNotExist) {
-			return apperror.NotFound("KRS extraction not found for npm: "+npm, err)
+			return apperror.NotFound("KRS extraction not found for npm: "+req.NPM, err)
 		}
 		if errors.Is(err, os.ErrPermission) {
 			return apperror.Forbidden("permission denied accessing KRS extraction")
@@ -138,7 +154,6 @@ func (h *ExtractionHandler) GetKRS(c fiber.Ctx) error {
 		return apperror.Internal("failed to retrieve KRS extraction", err)
 	}
 
-	// Return raw JSON bytes in the response envelope
 	var result map[string]interface{}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return apperror.Internal("failed to parse cached extraction", err)
@@ -147,27 +162,27 @@ func (h *ExtractionHandler) GetKRS(c fiber.Ctx) error {
 	return response.Success(c, fiber.StatusOK, result, "KRS data retrieved")
 }
 
-// GetKHS handles GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
+// GetKHS handles POST /api/v1/lms/khs/data
 func (h *ExtractionHandler) GetKHS(c fiber.Ctx) error {
-	npm := c.Params("npm")
-	tahunAjaran := c.Params("tahun_ajaran")
-	semester := c.Params("semester")
-
-	if tahunAjaran == "" || semester == "" {
-		return apperror.BadRequest("tahun_ajaran and semester parameters are required")
+	var req KHSDataRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return apperror.BadRequest("invalid request body")
 	}
 
-	if err := validateNPM(npm); err != nil {
+	if req.TahunAjaran == "" || req.Semester == "" {
+		return apperror.BadRequest("tahun_ajaran and semester are required")
+	}
+
+	if err := validateNPM(req.NPM); err != nil {
 		return err
 	}
 
-	// Validate semester format
-	semester = strings.ToUpper(semester)
+	semester := strings.ToUpper(req.Semester)
 	if semester != "GANJIL" && semester != "GENAP" {
 		return apperror.BadRequest("semester must be GANJIL or GENAP")
 	}
 
-	data, err := h.extractionSvc.GetKHSExtraction(npm, tahunAjaran, semester)
+	data, err := h.extractionSvc.GetKHSExtraction(req.NPM, req.TahunAjaran, semester)
 	if err != nil {
 		if errors.Is(err, apperror.ErrExtractionNotFound) || errors.Is(err, os.ErrNotExist) {
 			return apperror.NotFound("KHS extraction not found", err)
@@ -178,7 +193,6 @@ func (h *ExtractionHandler) GetKHS(c fiber.Ctx) error {
 		return apperror.Internal("failed to retrieve KHS extraction", err)
 	}
 
-	// Return raw JSON bytes in the response envelope
 	var result map[string]interface{}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return apperror.Internal("failed to parse cached extraction", err)
