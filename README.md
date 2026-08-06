@@ -14,7 +14,7 @@
 
 ## 📋 Ringkasan
 
-Backend API untuk sistem **Lonceng Unman** — dibangun dengan arsitektur bersih (Clean Architecture) menggunakan Go dan Fiber v3. Dirancang untuk scalability, maintainability, dan performa tinggi.
+Backend API untuk sistem **Lonceng Unman** — dibangun dengan arsitektur bersih (Clean Architecture) menggunakan Go dan Fiber v3. Mendukung login LMS, download KRS/KHS PDF, dan browser automation untuk integrasi dengan sistem e-learning.
 
 ## 🏗️ Arsitektur
 
@@ -89,24 +89,48 @@ Semua konfigurasi diambil dari environment variables. Copy `.env.example` ke `.e
 | `APP_ENV` | `development` | Environment (`development` / `production`) |
 | `APP_PORT` | `3000` | Port server |
 | `APP_HOST` | `0.0.0.0` | Host bind address |
-| `CORS_ALLOW_ORIGins` | `*` | Origin yang diizinkan CORS |
+| `CORS_ALLOW_ORIGINS` | `*` | Origin yang diizinkan CORS |
 | `CORS_ALLOW_METHODS` | `GET,POST,PUT,PATCH,DELETE,OPTIONS` | Method HTTP yang diizinkan |
 | `CORS_ALLOW_HEADERS` | `Content-Type,Authorization` | Header yang diizinkan |
+| `LMS_BASE_URL` | `https://elearning.universitasmandiri.ac.id` | Base URL LMS |
+| `LMS_DASHBOARD_URL` | `https://elearning.universitasmandiri.ac.id/admin/` | URL dashboard LMS |
+| `BROWSER_HEADLESS` | `true` | Jalankan browser tanpa GUI |
+| `BROWSER_TIMEOUT` | `30s` | Timeout untuk operasi browser |
+| `ACTION_TIMEOUT` | `10s` | Timeout untuk aksi spesifik |
+| `DOWNLOAD_DIR` | `./downloads` | Direktori penyimpanan file download |
 
 ## 📁 Struktur Project
 
 ```
 lonceng_unman_be/
-├── cmd/server/main.go                 # Entry point
+├── cmd/server/main.go                 # Entry point & DI wiring
 ├── internal/
 │   ├── config/config.go               # Env-based configuration
-│   ├── domain/entity/health.go        # Health entity
+│   ├── apperror/apperror.go           # Shared error types
+│   ├── domain/entity/                 # Business entities
+│   │   ├── health.go                  # Health entity
+│   │   ├── lms.go                     # LMS login entity
+│   │   └── document.go                # Document download entities
 │   ├── application/service/           # Business logic
+│   │   ├── health_service.go          # Health check service
+│   │   ├── lms_service.go             # LMS login & document service
+│   │   └── document_service.go        # Document download service
 │   ├── interfaces/http/               # HTTP layer
 │   │   ├── handler/                   # Request handlers
-│   │   ├── router/                    # Route definitions
-│   │   └── response/                  # JSON response helpers
-│   └── infrastructure/middleware/      # Middleware stack
+│   │   │   ├── health_handler.go
+│   │   │   ├── lms_handler.go
+│   │   │   └── document_handler.go
+│   │   ├── router/router.go           # Route definitions
+│   │   └── response/response.go       # JSON response helpers
+│   └── infrastructure/                # External integrations
+│       ├── browser/                   # Headless browser automation
+│       │   ├── browser.go             # Browser connection
+│       │   ├── selectors.go           # CSS selectors
+│       │   └── download.go            # PDF download & save
+│       ├── middleware/                 # HTTP middleware
+│       ├── logger/logger.go           # Structured logging
+│       └── fibererror/handler.go      # Global error handler
+├── tests/                             # External test packages
 ├── .env.example                       # Environment template
 ├── .gitignore
 ├── go.mod
@@ -119,6 +143,7 @@ lonceng_unman_be/
 |----------|-----------|
 | **Language** | Go 1.26+ |
 | **Framework** | [Fiber v3](https://gofiber.io/) |
+| **Browser Automation** | [go-rod](https://github.com/go-rod/rod) |
 | **Config** | [godotenv](https://github.com/joho/godotenv) |
 | **Validation** | [go-playground/validator](https://github.com/go-playground/validator) |
 | **ID Generation** | [google/uuid](https://github.com/google/uuid) |
@@ -128,6 +153,10 @@ lonceng_unman_be/
 | Method | Endpoint | Deskripsi |
 |--------|----------|-----------|
 | `GET` | `/api/v1/health` | Health check |
+| `POST` | `/api/v1/lms/login` | Login ke LMS |
+| `GET` | `/api/v1/lms/krs?npm=xxx` | Download KRS PDF |
+| `GET` | `/api/v1/lms/khs/semesters?npm=xxx` | Daftar semester KHS |
+| `GET` | `/api/v1/lms/khs?npm=xxx&tahun_ajaran=xxx&semester=xxx` | Download KHS PDF |
 
 ## 📄 Response Format
 
@@ -141,6 +170,108 @@ Semua endpoint mengembalikan JSON envelope:
   "errors": {}
 }
 ```
+
+### Contoh Response
+
+**Health Check:**
+```json
+{
+  "status": "success",
+  "data": {
+    "status": "ok",
+    "service": "lonceng_unman_be",
+    "version": "development"
+  },
+  "message": "Service is healthy"
+}
+```
+
+**KRS Download:**
+```json
+{
+  "status": "success",
+  "data": {
+    "success": true,
+    "message": "KRS downloaded successfully",
+    "npm": "2211700006",
+    "file_path": "downloads/2211700006/krs/krs.pdf",
+    "size": 12345,
+    "timestamp": "2026-08-06T00:45:00+07:00"
+  },
+  "message": "KRS downloaded successfully"
+}
+```
+
+**KHS Semesters:**
+```json
+{
+  "status": "success",
+  "data": {
+    "npm": "2211700006",
+    "semesters": [
+      {
+        "tahun_ajaran": "2022/2023",
+        "semester": "GANJIL",
+        "sks": 20
+      },
+      {
+        "tahun_ajaran": "2022/2023",
+        "semester": "GENAP",
+        "sks": 22
+      }
+    ],
+    "timestamp": "2026-08-06T00:45:00+07:00"
+  },
+  "message": "KHS semesters retrieved"
+}
+```
+
+**KHS Download:**
+```json
+{
+  "status": "success",
+  "data": {
+    "success": true,
+    "message": "KHS downloaded successfully",
+    "npm": "2211700006",
+    "tahun_ajaran": "2022/2023",
+    "semester": "GANJIL",
+    "file_path": "downloads/2211700006/khs/2022_2023_GANJIL.pdf",
+    "size": 15678,
+    "timestamp": "2026-08-06T00:45:00+07:00"
+  },
+  "message": "KHS downloaded successfully"
+}
+```
+
+**Error Response:**
+```json
+{
+  "status": "error",
+  "message": "npm query parameter is required",
+  "trace_id": "abc123"
+}
+```
+
+## 📂 Struktur Download
+
+File PDF yang di-download disimpan dengan nama canonical untuk mencegah duplikasi:
+
+```
+downloads/
+├── {NPM}/
+│   ├── krs/
+│   │   └── krs.pdf                    # KRS (selalu overwritten)
+│   └── khs/
+│       ├── 2022_2023_GANJIL.pdf        # KHS per semester
+│       ├── 2022_2023_GENAP.pdf
+│       └── 2023_2024_GANJIL.pdf
+```
+
+**Aturan Penamaan:**
+- KRS: `{downloadDir}/{npm}/krs/krs.pdf` (overwritten setiap download)
+- KHS: `{downloadDir}/{npm}/khs/{tahun_ajaran}_{semester}.pdf`
+- `tahun_ajaran`: `/` diganti `_` (contoh: `2022/2023` → `2022_2023`)
 
 ## 🤝 Kontribusi
 
