@@ -1,6 +1,19 @@
 package apperror
 
-import "github.com/gofiber/fiber/v3"
+import (
+	"errors"
+
+	"github.com/gofiber/fiber/v3"
+)
+
+// Sentinel errors for domain-level error classification.
+// Services wrap these with context; handlers check with errors.Is.
+var (
+	// ErrPDFNotFound indicates a required PDF file is missing from disk.
+	ErrPDFNotFound = errors.New("PDF file not found")
+	// ErrExtractionNotFound indicates no cached extraction result exists.
+	ErrExtractionNotFound = errors.New("extraction not found")
+)
 
 // AppError is a structured error that separates public messages (safe to send
 // to clients) from internal details (logged server-side only, never exposed).
