@@ -619,6 +619,218 @@ Response envelope → JSON output
 
 ---
 
+## PDF Extraction Endpoints
+
+### 6. Extract KRS
+
+Extract structured data from downloaded KRS PDF.
+
+```
+POST /api/v1/lms/krs/extract
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "npm": "2211700006",
+  "password": "izzan027"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `npm` | string | Yes | NPM (digits only) |
+| `password` | string | Yes | LMS password |
+
+**Response 200 OK:**
+
+```json
+{
+  "status": "success",
+  "data": {
+    "success": true,
+    "message": "KRS extracted successfully",
+    "npm": "2211700006",
+    "file_path": "extractions/2211700006/krs/semester_8.json",
+    "timestamp": "2026-08-06T12:45:00+07:00"
+  },
+  "message": "KRS extracted successfully"
+}
+```
+
+**Example curl:**
+
+```bash
+curl -X POST http://localhost:3000/api/v1/lms/krs/extract \
+  -H "Content-Type: application/json" \
+  -d '{"npm":"2211700006","password":"izzan027"}'
+```
+
+---
+
+### 7. Extract KHS
+
+Extract structured data from downloaded KHS PDF.
+
+```
+POST /api/v1/lms/khs/extract
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "npm": "2211700006",
+  "password": "izzan027",
+  "tahun_ajaran": "2022/2023",
+  "semester": "GENAP"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `npm` | string | Yes | NPM (digits only) |
+| `password` | string | Yes | LMS password |
+| `tahun_ajaran` | string | Yes | Academic year (e.g. `2022/2023`) |
+| `semester` | string | Yes | Semester (`GANJIL` or `GENAP`) |
+
+**Response 200 OK:**
+
+```json
+{
+  "status": "success",
+  "data": {
+    "success": true,
+    "message": "KHS extracted successfully",
+    "npm": "2211700006",
+    "file_path": "extractions/2211700006/khs/2022_2023_GENAP.json",
+    "timestamp": "2026-08-06T12:45:00+07:00"
+  },
+  "message": "KHS extracted successfully"
+}
+```
+
+**Example curl:**
+
+```bash
+curl -X POST http://localhost:3000/api/v1/lms/khs/extract \
+  -H "Content-Type: application/json" \
+  -d '{"npm":"2211700006","password":"izzan027","tahun_ajaran":"2022/2023","semester":"GENAP"}'
+```
+
+---
+
+### 8. Get KRS Data
+
+Get cached KRS extraction data.
+
+```
+GET /api/v1/lms/krs/data/:npm
+```
+
+**URL Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `npm` | string | Yes | NPM (digits only) |
+
+**Response 200 OK:**
+
+```json
+{
+  "status": "success",
+  "data": {
+    "krs": {
+      "mahasiswa": {
+        "nama": "MOCHAMAD IZZAN FIRASYANSYAH",
+        "npm": "2211700006",
+        "program_studi": "Sistem Informasi"
+      },
+      "periode": {
+        "tahun_ajaran": "2025/2026",
+        "semester": "GENAP"
+      },
+      "mata_kuliah": [...],
+      "total_sks": 12
+    },
+    "metadata": {
+      "extracted_at": "2026-08-06T12:45:00+07:00",
+      "source_file": "downloads/2211700006/krs/semester_8.pdf",
+      "file_size": 183701
+    }
+  },
+  "message": "KRS data retrieved"
+}
+```
+
+**Example curl:**
+
+```bash
+curl http://localhost:3000/api/v1/lms/krs/data/2211700006
+```
+
+---
+
+### 9. Get KHS Data
+
+Get cached KHS extraction data.
+
+```
+GET /api/v1/lms/khs/data/:npm/:tahun_ajaran/:semester
+```
+
+**URL Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `npm` | string | Yes | NPM (digits only) |
+| `tahun_ajaran` | string | Yes | Academic year (e.g. `2022/2023`) |
+| `semester` | string | Yes | Semester (`GANJIL` or `GENAP`) |
+
+**Response 200 OK:**
+
+```json
+{
+  "status": "success",
+  "data": {
+    "khs": {
+      "mahasiswa": {
+        "nama": "MOCHAMAD IZZAN FIRASYANSYAH",
+        "npm": "2211700006",
+        "program_studi": "Sistem Informasi"
+      },
+      "periode": {
+        "tahun_ajaran": "2022/2023",
+        "semester": "GENAP"
+      },
+      "mata_kuliah": [...],
+      "rekapitulasi": {
+        "total_sks": 23,
+        "total_mutu": 84,
+        "ipk": 3.65
+      }
+    },
+    "metadata": {
+      "extracted_at": "2026-08-06T12:45:00+07:00",
+      "source_file": "downloads/2211700006/khs/2022_2023_GENAP.pdf",
+      "file_size": 193331
+    }
+  },
+  "message": "KHS data retrieved"
+}
+```
+
+**Example curl:**
+
+```bash
+curl http://localhost:3000/api/v1/lms/khs/data/2211700006/2022/2023/GENAP
+```
+
+---
+
 ## Error Handling
 
 | HTTP Status | Constructor | When |
@@ -645,6 +857,7 @@ Response envelope → JSON output
 | `DOWNLOAD_DIR` | `./downloads` | Download directory |
 | `SESSION_TTL` | `15m` | Session cache duration before expiry |
 | `MAX_SESSIONS` | `10` | Maximum cached sessions in memory |
+| `EXTRACT_DIR` | `./extracted` | Directory for extracted JSON files |
 
 ---
 
