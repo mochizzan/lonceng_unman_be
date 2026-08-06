@@ -30,6 +30,7 @@ func main() {
 	app := fiber.New(fiber.Config{
 		AppName:      cfg.App.Name,
 		ErrorHandler: fibererror.New(),
+		BodyLimit:    int(cfg.App.MaxBodySize),
 	})
 
 	// Register middleware (recover → requestid → logger → cors)
@@ -43,7 +44,7 @@ func main() {
 	healthService := service.NewHealthService(cfg.App)
 	lmsService := service.NewLMSService(cfg, sessionMgr)
 	docService := service.NewLMSDocumentService(cfg, sessionMgr)
-	extractionService := service.NewExtractionService(cfg.App.DownloadDir, cfg.App.ExtractDir)
+	extractionService := service.NewExtractionService(cfg.App.DownloadDir, cfg.App.ExtractDir, sessionMgr)
 
 	// Wire HTTP handlers
 	healthHandler := handler.NewHealthHandler(healthService)
