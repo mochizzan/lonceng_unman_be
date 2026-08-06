@@ -34,21 +34,34 @@ func ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
 	return result, nil
 }
 
-// NormalizeLabel strips spaces between single characters to handle "N P M" → "NPM".
+// NormalizeLabel normalizes a line for pattern matching.
+// It handles two cases:
+// 1. Collapses spaces between single uppercase letters: "N P M" → "NPM"
+// 2. Inserts spaces before uppercase letters after lowercase: "ProgramStudi" → "Program Studi"
 func NormalizeLabel(s string) string {
-	// Remove spaces between single uppercase letters (e.g., "N P M" → "NPM")
 	var result strings.Builder
 	runes := []rune(s)
-	for i := 0; i < len(runes); i++ {
-		if runes[i] == ' ' && i > 0 && i+1 < len(runes) {
-			// Check if surrounded by single uppercase letters
+	for i, r := range runes {
+		// Skip spaces between single uppercase letters
+		if r == ' ' && i > 0 && i+1 < len(runes) {
 			if IsUpperLetter(runes[i-1]) && IsUpperLetter(runes[i+1]) {
-				continue // skip this space
+				continue
 			}
 		}
-		result.WriteRune(runes[i])
+
+		// Insert space before uppercase letter that follows a lowercase letter
+		if i > 0 && IsUpperLetter(r) && isLowerLetter(runes[i-1]) && runes[i-1] != ' ' {
+			result.WriteRune(' ')
+		}
+
+		result.WriteRune(r)
 	}
 	return result.String()
+}
+
+// isLowerLetter checks if a rune is a lowercase Latin letter.
+func isLowerLetter(r rune) bool {
+	return r >= 'a' && r <= 'z'
 }
 
 // IsUpperLetter checks if a rune is an uppercase Latin letter.
@@ -125,17 +138,14 @@ func parseKRSHeader(lines []string, result *entity.KRSExtraction) {
 		}
 
 		// Look for semester: "Semester : GENAP" or "Semester" + next line ": GENAP"
-		if i > 0 && strings.Contains(normalized, "Semester") {
-			// Avoid matching "Semester" in table headers
-			if !strings.Contains(lines[i-1], "Mata Kuliah") {
-				if strings.Contains(line, ":") {
-					parts := strings.SplitN(line, ":", 2)
-					if len(parts) == 2 {
-						result.KRS.Periode.Semester = strings.TrimSpace(parts[1])
-					}
-				} else if val := FindNextValueLine(lines, i); val != "" {
-					result.KRS.Periode.Semester = val
+		if strings.Contains(normalized, "Semester") {
+			if strings.Contains(line, ":") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					result.KRS.Periode.Semester = strings.TrimSpace(parts[1])
 				}
+			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KRS.Periode.Semester = val
 			}
 		}
 	}
@@ -146,7 +156,8 @@ func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtract
 	// Find table start marker
 	tableStart := -1
 	for i, line := range lines {
-		if strings.Contains(line, "Kode") && strings.Contains(line, "Mata Kuliah") {
+		normalized := NormalizeLabel(line)
+		if strings.Contains(normalized, "Kode") && strings.Contains(normalized, "Mata Kuliah") {
 			tableStart = i + 1
 			break
 		}
@@ -306,8 +317,9 @@ func parseKRSPenerbitan(lines []string, result *entity.KRSExtraction) {
 	}
 
 	for _, line := range lines {
+		normalized := NormalizeLabel(line)
 		// Look for "Dikeluarkan di" pattern
-		if strings.Contains(line, "Dikeluarkan di") || strings.Contains(line, "dikeluarkan di") {
+		if strings.Contains(normalized, "Dikeluarkan di") || strings.Contains(normalized, "dikeluarkan di") {
 			parts := strings.SplitN(line, ",", 2)
 			if len(parts) == 2 {
 				result.KRS.Penerbitan.Tempat = strings.TrimSpace(parts[0])
@@ -337,7 +349,8 @@ func parseKRSPenerbitan(lines []string, result *entity.KRSExtraction) {
 // parseKRSPersetujuan extracts approval section from KRS.
 func parseKRSPersetujuan(lines []string, result *entity.KRSExtraction) {
 	for i, line := range lines {
-		if strings.Contains(line, "Ketua Program Studi") {
+		normalized := NormalizeLabel(line)
+		if strings.Contains(normalized, "Ketua Program Studi") {
 			result.KRS.Persetujuan.KetuaProgramStudi.Jabatan = line
 			// Look for name in next lines
 			for j := i + 1; j < len(lines) && j < i+5; j++ {

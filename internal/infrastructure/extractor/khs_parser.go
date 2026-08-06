@@ -88,7 +88,8 @@ func parseKHSMataKuliah(rows []PDFRow, lines []string, result *entity.KHSExtract
 	// Find table start marker
 	tableStart := -1
 	for i, line := range lines {
-		if strings.Contains(line, "Kode") && strings.Contains(line, "Mata Kuliah") {
+		normalized := NormalizeLabel(line)
+		if strings.Contains(normalized, "Kode") && strings.Contains(normalized, "Mata Kuliah") {
 			tableStart = i + 1
 			break
 		}
@@ -177,8 +178,10 @@ func parseKHSMataKuliah(rows []PDFRow, lines []string, result *entity.KHSExtract
 // parseKHSRekapitulasi extracts summary stats from KHS.
 func parseKHSRekapitulasi(lines []string, result *entity.KHSExtraction) {
 	for _, line := range lines {
+		normalized := NormalizeLabel(line)
+
 		// Look for total SKS: "Total SKS : 23"
-		if strings.Contains(line, "Total SKS") && strings.Contains(line, ":") {
+		if strings.Contains(normalized, "Total SKS") && strings.Contains(line, ":") {
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				result.KHS.Rekapitulasi.TotalSKS = parseIntSafe(parts[1])
@@ -186,7 +189,7 @@ func parseKHSRekapitulasi(lines []string, result *entity.KHSExtraction) {
 		}
 
 		// Look for total mutu: "Total Mutu : 84"
-		if strings.Contains(line, "Total Mutu") && strings.Contains(line, ":") {
+		if strings.Contains(normalized, "Total Mutu") && strings.Contains(line, ":") {
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				result.KHS.Rekapitulasi.TotalMutu = parseIntSafe(parts[1])
@@ -194,7 +197,7 @@ func parseKHSRekapitulasi(lines []string, result *entity.KHSExtraction) {
 		}
 
 		// Look for IPK: "IPK : 3.65"
-		if strings.Contains(line, "IPK") && strings.Contains(line, ":") {
+		if strings.Contains(normalized, "IPK") && strings.Contains(line, ":") {
 			parts := strings.SplitN(line, ":", 2)
 			if len(parts) == 2 {
 				result.KHS.Rekapitulasi.IPK = parseFloatSafe(parts[1])
@@ -215,8 +218,9 @@ func parseKHSPenerbitan(lines []string, result *entity.KHSExtraction) {
 	}
 
 	for _, line := range lines {
+		normalized := NormalizeLabel(line)
 		// Look for "Dikeluarkan di" pattern
-		if strings.Contains(line, "Dikeluarkan di") || strings.Contains(line, "dikeluarkan di") {
+		if strings.Contains(normalized, "Dikeluarkan di") || strings.Contains(normalized, "dikeluarkan di") {
 			parts := strings.SplitN(line, ",", 2)
 			if len(parts) == 2 {
 				result.KHS.Penerbitan.Tempat = strings.TrimSpace(parts[0])
@@ -246,7 +250,8 @@ func parseKHSPenerbitan(lines []string, result *entity.KHSExtraction) {
 // parseKHSPersetujuan extracts approval section from KHS.
 func parseKHSPersetujuan(lines []string, result *entity.KHSExtraction) {
 	for i, line := range lines {
-		if strings.Contains(line, "Dekan") && strings.Contains(line, "Fakultas") {
+		normalized := NormalizeLabel(line)
+		if strings.Contains(normalized, "Dekan") && strings.Contains(normalized, "Fakultas") {
 			result.KHS.Persetujuan.Dekan.Jabatan = line
 			// Look for name in next lines
 			for j := i + 1; j < len(lines) && j < i+5; j++ {

@@ -159,13 +159,52 @@ func roundY(y float64) float64 {
 	return float64(int(y*4)) / 4.0
 }
 
+// roundX rounds X position to nearest 0.5 to group characters at same position.
+func roundX(x float64) float64 {
+	return float64(int(x*2)) / 2.0
+}
+
 // RowToLine converts a PDFRow to a single line string.
+// Characters at the same X position (within tolerance) are joined without spaces,
+// since they belong to the same visual token. Different X groups are separated by spaces.
 func RowToLine(row PDFRow) string {
-	var parts []string
+	if len(row.Words) == 0 {
+		return ""
+	}
+
+	// Group words by X position
+	type xGroup struct {
+		x     float64
+		texts []string
+	}
+	var groups []xGroup
+	var lastX float64
+	var currentGroup *xGroup
+
 	for _, w := range row.Words {
-		parts = append(parts, w.Text)
+		xKey := roundX(w.X)
+		if currentGroup == nil || abs(xKey-lastX) > 0.5 {
+			groups = append(groups, xGroup{x: xKey})
+			currentGroup = &groups[len(groups)-1]
+			lastX = xKey
+		}
+		currentGroup.texts = append(currentGroup.texts, w.Text)
+	}
+
+	// Join each group without spaces, separate groups with spaces
+	var parts []string
+	for _, g := range groups {
+		parts = append(parts, strings.Join(g.texts, ""))
 	}
 	return strings.Join(parts, " ")
+}
+
+// abs returns the absolute value of a float64.
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // RowsToLines converts multiple PDFRows to lines.
