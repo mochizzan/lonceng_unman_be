@@ -221,8 +221,7 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 	slog.Info("downloading KHS PDF", "url", pdfURL)
 
 	// Build canonical save path and download.
-	year := strings.ReplaceAll(req.TahunAjaran, "/", "_")
-	savePath := filepath.Join(s.cfg.App.DownloadDir, req.NPM, "khs", fmt.Sprintf("%s_%s.pdf", year, req.Semester))
+	savePath := filepath.Join(s.cfg.App.DownloadDir, req.NPM, "khs", entity.KHSFilename(req.TahunAjaran, req.Semester))
 
 	filename, size, err := session.DownloadPDF(pdfURL, savePath)
 	if err != nil {

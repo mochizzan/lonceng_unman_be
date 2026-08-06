@@ -1,6 +1,10 @@
 package entity
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // KRSDownloadRequest represents the input for a KRS PDF download.
 type KRSDownloadRequest struct {
@@ -56,4 +60,13 @@ type KHSSemestersResult struct {
 	NPM       string        `json:"npm"`
 	Semesters []KHSSemester `json:"semesters"`
 	Timestamp time.Time     `json:"timestamp"`
+}
+
+// KHSFilename generates the canonical KHS PDF filename.
+// Format: {TahunAjaran}_{Semester}.pdf where "/" in TahunAjaran is replaced with "_".
+// Example: KHSFilename("2022/2023", "GANJIL") -> "2022_2023_GANJIL.pdf"
+func KHSFilename(tahunAjaran string, semester string) string {
+	semester = strings.ToUpper(semester)
+	tahun := strings.Replace(tahunAjaran, "/", "_", -1)
+	return fmt.Sprintf("%s_%s.pdf", tahun, semester)
 }

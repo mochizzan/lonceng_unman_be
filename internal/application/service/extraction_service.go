@@ -224,7 +224,7 @@ func extractSemesterNum(filename string) int {
 // findKHSFile finds the KHS PDF file for a given NPM, tahun ajaran, and semester.
 func (s *extractionService) findKHSFile(npm string, tahunAjaran string, semester string) (string, error) {
 	khsDir := filepath.Join(s.downloadDir, npm, "khs")
-	filename := s.khsFilename(tahunAjaran, semester)
+	filename := entity.KHSFilename(tahunAjaran, semester)
 	path := filepath.Join(khsDir, filename)
 
 	if _, err := os.Stat(path); err != nil {
@@ -237,30 +237,14 @@ func (s *extractionService) findKHSFile(npm string, tahunAjaran string, semester
 	return path, nil
 }
 
-// getKRSSemester extracts semester number from KRS filename.
-// Handles: "semester_8.pdf" -> "8", "semester_12.pdf" -> "12"
+// getKRSSemester extracts the semester number string from a KRS PDF path.
+// Handles: "semester_8.pdf" → "8", "semester_12.pdf" → "12"
 func (s *extractionService) getKRSSemester(pdfPath string) string {
-	filename := filepath.Base(pdfPath)
-	// Remove .pdf extension
-	name := strings.TrimSuffix(filename, ".pdf")
-	// Remove "semester_" prefix
-	if strings.HasPrefix(name, "semester_") {
-		return strings.TrimPrefix(name, "semester_")
-	}
-	// Fallback: return cleaned filename
-	return strings.ReplaceAll(name, " ", "_")
-}
-
-// khsFilename generates the canonical KHS filename.
-func (s *extractionService) khsFilename(tahunAjaran string, semester string) string {
-	semester = strings.ToUpper(semester)
-	tahun := strings.Replace(tahunAjaran, "/", "_", -1)
-	return fmt.Sprintf("%s_%s.pdf", tahun, semester)
+	return strconv.Itoa(extractSemesterNum(filepath.Base(pdfPath)))
 }
 
 // khsCacheFilename generates the KHS cache filename.
 func (s *extractionService) khsCacheFilename(tahunAjaran string, semester string) string {
-	semester = strings.ToUpper(semester)
-	tahun := strings.Replace(tahunAjaran, "/", "_", -1)
-	return fmt.Sprintf("%s_%s.json", tahun, semester)
+	base := entity.KHSFilename(tahunAjaran, semester)
+	return strings.TrimSuffix(base, ".pdf") + ".json"
 }
