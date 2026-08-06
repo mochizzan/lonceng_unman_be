@@ -29,6 +29,7 @@ type AppConfig struct {
 	ActionTimeout   time.Duration
 	// Document Download
 	DownloadDir string
+	ExtractDir  string
 	// Session Management
 	SessionTTL  time.Duration
 	MaxSessions int
@@ -59,6 +60,7 @@ func New() (*Config, error) {
 			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 30*time.Second),
 			ActionTimeout:   getEnvDuration("ACTION_TIMEOUT", 10*time.Second),
 			DownloadDir:     getEnv("DOWNLOAD_DIR", "./downloads"),
+			ExtractDir:      getEnv("EXTRACT_DIR", "./extracted"),
 			SessionTTL:      getEnvDuration("SESSION_TTL", 15*time.Minute),
 			MaxSessions:     getEnvInt("MAX_SESSIONS", 10),
 		},
@@ -106,6 +108,10 @@ func (c *Config) Validate() error {
 
 	if c.App.DownloadDir == "" {
 		return fmt.Errorf("DOWNLOAD_DIR must not be empty")
+	}
+
+	if c.App.ExtractDir == "" {
+		return fmt.Errorf("EXTRACT_DIR must not be empty")
 	}
 
 	return nil

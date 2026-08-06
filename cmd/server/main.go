@@ -43,14 +43,16 @@ func main() {
 	healthService := service.NewHealthService(cfg.App)
 	lmsService := service.NewLMSService(cfg, sessionMgr)
 	docService := service.NewLMSDocumentService(cfg, sessionMgr)
+	extractionService := service.NewExtractionService(cfg.App.DownloadDir, cfg.App.ExtractDir)
 
 	// Wire HTTP handlers
 	healthHandler := handler.NewHealthHandler(healthService)
 	lmsHandler := handler.NewLMSHandler(lmsService)
 	docHandler := handler.NewDocumentHandler(docService)
+	extractionHandler := handler.NewExtractionHandler(extractionService)
 
 	// Register routes
-	router.Setup(app, healthHandler, lmsHandler, docHandler)
+	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler)
 
 	// Start server
 	log.Info(
