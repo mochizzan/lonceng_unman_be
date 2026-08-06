@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"lonceng_unman_be/internal/config"
@@ -16,12 +17,16 @@ import (
 )
 
 // cachedSession holds an authenticated browser session for a single NPM.
+// activeCount tracks how many request goroutines currently hold a rodSession
+// derived from this cachedSession. Eviction and cleanup must not close a
+// session whose activeCount > 0.
 type cachedSession struct {
-	page      *rod.Page
-	browser   *browserInfra.Browser
-	createdAt time.Time
-	lastUsed  time.Time
-	mu        sync.Mutex // guards page operations within this session
+	page        *rod.Page
+	browser     *browserInfra.Browser
+	createdAt   time.Time
+	lastUsed    time.Time
+	mu          sync.Mutex // guards page operations within this session
+	activeCount int32      // atomic: number of active rodSession holders
 }
 
 // Manager is an in-memory session cache keyed by NPM.
@@ -64,8 +69,9 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 		sess.mu.Lock()
 		sess.lastUsed = time.Now()
 		sess.mu.Unlock()
+		atomic.AddInt32(&sess.activeCount, 1)
 		slog.Info("session reused", "npm", npm)
-		return newSession(sess.page), nil
+		return newSession(sess), nil
 	}
 
 	// Slow path: create a new session (write lock).
@@ -77,8 +83,9 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 		sess.mu.Lock()
 		sess.lastUsed = time.Now()
 		sess.mu.Unlock()
+		atomic.AddInt32(&sess.activeCount, 1)
 		slog.Info("session reused (double-check)", "npm", npm)
-		return newSession(sess.page), nil
+		return newSession(sess), nil
 	}
 
 	// Evict expired session if exists.
@@ -101,8 +108,9 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 		return nil, err
 	}
 
+	atomic.AddInt32(&sess.activeCount, 1)
 	m.sessions[npm] = sess
-	return newSession(sess.page), nil
+	return newSession(sess), nil
 }
 
 // Close releases the session for the given NPM.
@@ -241,12 +249,16 @@ func (m *Manager) login(page *rod.Page, npm, password string) error {
 	return nil
 }
 
-// evictOldest closes and removes the session with the oldest lastUsed time.
+// evictOldest closes and removes the session with the oldest lastUsed time,
+// skipping any session that is currently in active use.
 func (m *Manager) evictOldest() {
 	var oldestNPM string
 	var oldestTime time.Time
 
 	for npm, sess := range m.sessions {
+		if atomic.LoadInt32(&sess.activeCount) > 0 {
+			continue // don't evict active sessions
+		}
 		if oldestNPM == "" || sess.lastUsed.Before(oldestTime) {
 			oldestNPM = npm
 			oldestTime = sess.lastUsed
@@ -279,6 +291,7 @@ func (m *Manager) cleanupLoop() {
 }
 
 // cleanup removes all sessions that have exceeded the TTL.
+// Sessions with active users (activeCount > 0) are skipped.
 func (m *Manager) cleanup() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -286,6 +299,10 @@ func (m *Manager) cleanup() {
 	now := time.Now()
 	for npm, sess := range m.sessions {
 		if now.Sub(sess.lastUsed) > m.ttl {
+			if atomic.LoadInt32(&sess.activeCount) > 0 {
+				slog.Info("session expired but still active, skipping", "npm", npm)
+				continue
+			}
 			sess.mu.Lock()
 			_ = sess.browser.Close()
 			sess.mu.Unlock()
