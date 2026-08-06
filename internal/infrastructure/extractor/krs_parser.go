@@ -9,25 +9,8 @@ import (
 	"lonceng_unman_be/internal/domain/entity"
 )
 
-// indonesianMonths maps Indonesian month names to English for date parsing.
-var indonesianMonths = map[string]string{
-	"Januari": "January", "Februari": "February", "Maret": "March",
-	"April": "April", "Mei": "May", "Juni": "June",
-	"Juli": "July", "Agustus": "August", "September": "September",
-	"Oktober": "October", "November": "November", "Desember": "December",
-}
-
-// dateFormats lists Go time.Parse formats to try for Indonesian dates.
-var dateFormats = []string{"2 January 2006", "02 January 2006", "January 2, 2006"}
-
-// dateOutputFormat is the ISO date format used for output.
-const dateOutputFormat = "2006-01-02"
-
 // indonesianDays lists Indonesian day names for schedule parsing.
 var indonesianDays = []string{"Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"}
-
-// MaxSKS is the maximum plausible SKS credit value.
-const MaxSKS = 12
 
 // ParseKRS extracts structured KRS data from a PDF file.
 // It uses ReadPDF (plain text) for header fields and table data to preserve word spacing,
@@ -47,7 +30,8 @@ func ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
 	// Use plain text for header fields (handles gopdf horizontal format)
 	plainText, err := ReadPDF(path)
 	if err == nil {
-		parsePlainTextHeaderKRS(plainText, result)
+		lines := strings.Split(plainText, "\n")
+		parsePlainTextHeaderKRS(lines, result)
 	}
 
 	// Use position-based extraction for table data (works reliably with gopdf TextSpans)
@@ -91,248 +75,16 @@ func NormalizeLabel(s string) string {
 	return result.String()
 }
 
-// isLowerLetter checks if a rune is a lowercase Latin letter.
-func isLowerLetter(r rune) bool {
-	return r >= 'a' && r <= 'z'
-}
-
 // parsePlainTextHeaderKRS extracts header fields from plain text output.
-// gopdf produces horizontal format: "Label : Value" on one line,
-// while the old library produced vertical format (label/colon/value on separate lines).
-// This function handles both formats.
-func parsePlainTextHeaderKRS(text string, result *entity.KRSExtraction) {
-	lines := strings.Split(text, "\n")
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		// Handle horizontal format: "Nama : Value"
-		if strings.Contains(trimmed, ":") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			label := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			if value == "" {
-				continue
-			}
-
-			switch label {
-			case "Nama":
-				result.KRS.Mahasiswa.Nama = value
-			case "NPM":
-				result.KRS.Mahasiswa.NPM = value
-			case "Program Studi":
-				result.KRS.Mahasiswa.ProgramStudi = value
-			case "Tahun Ajaran":
-				result.KRS.Periode.TahunAjaran = value
-			case "Semester":
-				result.KRS.Periode.Semester = value
-			}
-		}
-	}
-}
-
-// extractNextColonValue looks for ":" in the next few lines and returns the value after it.
-// Handles formats:
-//   - "Label\n:\nValue" (colon on its own line)
-//   - "Label: Value" (colon on same line as label)
-//   - "Label\n: Value" (colon on next line with value)
-func extractNextColonValue(lines []string, startIdx int) string {
-	// First check if the current line has colon with value
-	currentLine := strings.TrimSpace(lines[startIdx])
-	if strings.Contains(currentLine, ":") {
-		parts := strings.SplitN(currentLine, ":", 2)
-		if len(parts) == 2 {
-			return strings.TrimSpace(parts[1])
-		}
-	}
-
-	// Look in next few lines for colon
-	for j := startIdx + 1; j < len(lines) && j < startIdx+4; j++ {
-		trimmed := strings.TrimSpace(lines[j])
-
-		// Case 1: Line is just ":" → value is on the next line
-		if trimmed == ":" {
-			if j+1 < len(lines) {
-				return strings.TrimSpace(lines[j+1])
-			}
-			return ""
-		}
-
-		// Case 2: Line starts with ":" → value is after the colon
-		if strings.HasPrefix(trimmed, ":") {
-			return strings.TrimSpace(strings.TrimPrefix(trimmed, ":"))
-		}
-	}
-
-	return ""
-}
-
-// IsUpperLetter checks if a rune is an uppercase Latin letter.
-func IsUpperLetter(r rune) bool {
-	return r >= 'A' && r <= 'Z'
-}
-
-// FindNextValueLine looks for a value starting with ":" in the next few lines.
-// Returns the trimmed value after ":", or empty string if not found.
-func FindNextValueLine(lines []string, startIdx int) string {
-	for j := startIdx + 1; j < len(lines) && j < startIdx+3; j++ {
-		nextLine := strings.TrimSpace(lines[j])
-		if strings.HasPrefix(nextLine, ":") {
-			return strings.TrimSpace(strings.TrimPrefix(nextLine, ":"))
-		}
-	}
-	return ""
-}
-
-// parsePlainTextTableKRS extracts the course table from plain text output.
-// The plain text format has each column value on a separate line:
-//
-// No.
-// Kode
-// Mata Kuliah
-// SKS
-// KELAS
-// DOSEN
-// JADWAL
-// 1
-// SI40306
-// Tugas Akhir/Skripsi
-// 6
-// SI-8A
-// TIM DOSEN FAKULTAS TEKNIK
-// Sabtu
-// 08:00 s/d 09:40
-//
-// This produces correctly spaced text unlike position-based extraction.
-func parsePlainTextTableKRS(text string, result *entity.KRSExtraction) {
-	lines := strings.Split(text, "\n")
-
-	// Find the header row: look for consecutive lines matching column names
-	headerIdx := -1
-	for i := 0; i < len(lines)-6; i++ {
-		if strings.TrimSpace(lines[i]) == "No." &&
-			strings.TrimSpace(lines[i+1]) == "Kode" &&
-			strings.TrimSpace(lines[i+2]) == "Mata Kuliah" {
-			headerIdx = i
-			break
-		}
-	}
-
-	if headerIdx == -1 {
-		return
-	}
-
-	// Find the table end: look for "Total"
-	tableEnd := len(lines)
-	for i := headerIdx + 7; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == "Total" {
-			tableEnd = i
-			break
-		}
-	}
-
-	// Each course takes 7 lines (No, Kode, Mata Kuliah, SKS, KELAS, DOSEN)
-	// plus optionally 2 lines for schedule (day, time)
-	// Parse course by course
-	var courses []entity.KRSMataKuliah
-	courseNo := 1
-
-	dataStart := headerIdx + 7 // skip 7 header lines
-	for i := dataStart; i < tableEnd; {
-		// Read 7 lines for one course
-		if i+6 >= tableEnd {
-			break
-		}
-
-		// Skip empty lines
-		for i < tableEnd && strings.TrimSpace(lines[i]) == "" {
-			i++
-		}
-		if i+6 >= tableEnd {
-			break
-		}
-
-		kode := strings.TrimSpace(lines[i+1])
-		nama := strings.TrimSpace(lines[i+2])
-		sksStr := strings.TrimSpace(lines[i+3])
-		kelas := strings.TrimSpace(lines[i+4])
-		dosen := strings.TrimSpace(lines[i+5])
-
-		// Validate: Kode should be a course code (contains digits)
-		if kode == "" || len(kode) < 3 {
-			i++
-			continue
-		}
-		hasDigit := false
-		for _, r := range kode {
-			if r >= '0' && r <= '9' {
-				hasDigit = true
-				break
-			}
-		}
-		if !hasDigit {
-			i++
-			continue
-		}
-
-		// Parse SKS
-		sks := parseIntSafe(sksStr)
-
-		course := entity.KRSMataKuliah{
-			No:    courseNo,
-			Kode:  kode,
-			Nama:  nama,
-			SKS:   sks,
-			Kelas: kelas,
-			Dosen: dosen,
-		}
-
-		i += 6 // advance past the 7 course lines (0-6)
-
-		// Check for schedule (day + time) in next lines
-		if i < tableEnd {
-			dayLine := strings.TrimSpace(lines[i])
-			if isIndonesianDay(dayLine) {
-				course.Jadwal.Hari = extractDayName(dayLine)
-				i++
-				if i < tableEnd {
-					timeLine := strings.TrimSpace(lines[i])
-					if strings.Contains(timeLine, ":") {
-						course.Jadwal = parseJadwal(dayLine + " " + timeLine)
-						i++
-					}
-				}
-			}
-		}
-
-		courses = append(courses, course)
-		courseNo++
-	}
-
-	result.KRS.MataKuliah = courses
-
-	// Calculate total SKS
-	total := 0
-	for _, c := range courses {
-		total += c.SKS
-	}
-	result.KRS.TotalSKS = total
-}
-
-// extractDayName extracts the Indonesian day name from a line.
-func extractDayName(line string) string {
-	for _, day := range indonesianDays {
-		if strings.Contains(line, day) {
-			return day
-		}
-	}
-	return ""
+// Uses shared parseHeaderFields helper for consistent label matching.
+func parsePlainTextHeaderKRS(lines []string, result *entity.KRSExtraction) {
+	labels := []string{"N P M", "Nama", "Program Studi", "Tahun Ajaran", "Semester"}
+	fields := parseHeaderFields(lines, labels)
+	result.KRS.Mahasiswa.NPM = fields["N P M"]
+	result.KRS.Mahasiswa.Nama = fields["Nama"]
+	result.KRS.Mahasiswa.ProgramStudi = fields["Program Studi"]
+	result.KRS.Periode.TahunAjaran = fields["Tahun Ajaran"]
+	result.KRS.Periode.Semester = fields["Semester"]
 }
 
 // krsColumnNames defines the expected column headers for KRS table extraction.
@@ -595,54 +347,11 @@ func isValidTime(s string) bool {
 }
 
 // parseKRSPenerbitan extracts publication info from KRS.
-// Handles formats: "Subang, 06 Agustus 2026", "Dikeluarkan di Subang, 06 Agustus 2026"
+// Uses shared parsePenerbitanFromLines for date/city extraction.
 func parseKRSPenerbitan(lines []string, result *entity.KRSExtraction) {
-	for _, line := range lines {
-		// Look for a line containing a comma followed by a date pattern
-		// Format: "City, DD Month YYYY" or "City, D Month YYYY"
-		if !strings.Contains(line, ",") {
-			continue
-		}
-
-		parts := strings.SplitN(line, ",", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		tempat := strings.TrimSpace(parts[0])
-		dateStr := strings.TrimSpace(parts[1])
-
-		// Check if the second part contains a month name (Indonesian)
-		monthFound := false
-		var monthEng string
-		for indo, eng := range indonesianMonths {
-			if strings.Contains(dateStr, indo) {
-				dateStr = strings.Replace(dateStr, indo, eng, 1)
-				monthFound = true
-				monthEng = eng
-				break
-			}
-		}
-		if !monthFound {
-			continue
-		}
-
-		// Try to parse the date
-		for _, format := range dateFormats {
-			if t, err := time.Parse(format, dateStr); err == nil {
-				result.KRS.Penerbitan.Tempat = tempat
-				result.KRS.Penerbitan.Tanggal = t.Format(dateOutputFormat)
-				break
-			}
-		}
-
-		// If we found a tempat and tanggal, we're done
-		if result.KRS.Penerbitan.Tempat != "" && result.KRS.Penerbitan.Tanggal != "" {
-			break
-		}
-
-		// Reset for next attempt
-		_ = monthEng
-	}
+	p := parsePenerbitanFromLines(lines)
+	result.KRS.Penerbitan.Tempat = p.Tempat
+	result.KRS.Penerbitan.Tanggal = p.Tanggal
 }
 
 // parseKRSPersetujuan extracts approval section from KRS.
@@ -657,8 +366,7 @@ func parseKRSPersetujuan(lines []string, result *entity.KRSExtraction) {
 	for i, line := range lines {
 		normalized := NormalizeLabel(line)
 
-		// Extract mahasiswa name: "Mahasiswa" appears as part of a combined line
-		// with "Ketua Prgram Studi..." — the name is on the NEXT line.
+		// Extract mahasiswa name: KRS-specific combined line detection
 		if strings.Contains(line, "Mahasiswa") && strings.Contains(line, "Ketua") {
 			if i+1 < len(lines) {
 				nextLine := strings.TrimSpace(lines[i+1])
@@ -669,11 +377,16 @@ func parseKRSPersetujuan(lines []string, result *entity.KRSExtraction) {
 			}
 		}
 
-		// Extract ketua prodi jabatan and nama
+		// Extract ketua prodi jabatan and nama using shared helper
 		if strings.Contains(normalized, "Ketua Program Studi") ||
 			strings.Contains(normalized, "Ketua Prgram Studi") {
 			result.KRS.Persetujuan.KetuaProgramStudi.Jabatan = line
-			// Name is usually the dots line (signature), so Nama stays nil
+			name := extractNextNonEmptyAfterLabel(lines, i, func(s string) bool {
+				return true
+			})
+			if name != "" {
+				result.KRS.Persetujuan.KetuaProgramStudi.Nama = &name
+			}
 		}
 
 		// Extract NIDN
@@ -686,22 +399,4 @@ func parseKRSPersetujuan(lines []string, result *entity.KRSExtraction) {
 			}
 		}
 	}
-}
-
-// extractNameBeforeDots extracts the name portion before a sequence of dots.
-// For example: "MOCHAMAD IZZAN FIRASYANSYAH .............." → "MOCHAMAD IZZAN FIRASYANSYAH"
-func extractNameBeforeDots(s string) string {
-	idx := strings.Index(s, "..")
-	if idx > 0 {
-		s = s[:idx]
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	// Skip lines that are just labels (not names)
-	if s == "Mahasiswa" || s == "Ketua" || s == "Dekan" {
-		return ""
-	}
-	return s
 }

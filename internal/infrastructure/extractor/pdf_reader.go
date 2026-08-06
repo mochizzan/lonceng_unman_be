@@ -14,23 +14,31 @@ const (
 	maxPDFSize = 50 * 1024 * 1024 // 50MB limit
 )
 
-// ReadPDF extracts plain text from a PDF file.
-func ReadPDF(path string) (string, error) {
-	// Validate file exists and size
+// openPDF validates a PDF file exists and is within size limits, then opens it.
+func openPDF(path string) (*gopdf.Document, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("pdf file not found: %s", path)
+			return nil, fmt.Errorf("pdf file not found: %s", path)
 		}
-		return "", fmt.Errorf("stat pdf: %w", err)
+		return nil, fmt.Errorf("stat pdf: %w", err)
 	}
 	if info.Size() > maxPDFSize {
-		return "", fmt.Errorf("pdf too large: %d bytes (max %d)", info.Size(), maxPDFSize)
+		return nil, fmt.Errorf("pdf too large: %d bytes (max %d)", info.Size(), maxPDFSize)
 	}
 
 	doc, err := gopdf.OpenFile(path)
 	if err != nil {
-		return "", fmt.Errorf("open pdf (may be corrupted): %w", err)
+		return nil, fmt.Errorf("open pdf (may be corrupted): %w", err)
+	}
+	return doc, nil
+}
+
+// ReadPDF extracts plain text from a PDF file.
+func ReadPDF(path string) (string, error) {
+	doc, err := openPDF(path)
+	if err != nil {
+		return "", err
 	}
 
 	text, err := doc.Text()
@@ -65,21 +73,9 @@ type PDFRow struct {
 
 // ReadPDFWithPosition extracts text with positions from a PDF file.
 func ReadPDFWithPosition(path string) ([]PDFRow, error) {
-	// Validate file exists and size
-	info, err := os.Stat(path)
+	doc, err := openPDF(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("pdf file not found: %s", path)
-		}
-		return nil, fmt.Errorf("stat pdf: %w", err)
-	}
-	if info.Size() > maxPDFSize {
-		return nil, fmt.Errorf("pdf too large: %d bytes (max %d)", info.Size(), maxPDFSize)
-	}
-
-	doc, err := gopdf.OpenFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("open pdf (may be corrupted): %w", err)
+		return nil, err
 	}
 
 	totalPage := doc.NumPages()
@@ -194,24 +190,23 @@ func roundX(x float64) float64 {
 	return float64(int(x*2)) / 2.0
 }
 
-// RowToLine converts a PDFRow to a single line string.
-// Characters at the same X position (within tolerance) are joined without spaces,
-// since they belong to the same visual token. Different X groups are separated by spaces.
-func RowToLine(row PDFRow) string {
-	if len(row.Words) == 0 {
-		return ""
-	}
+// xGroup represents a group of words sharing the same rounded X position.
+type xGroup struct {
+	x     float64
+	texts []string
+}
 
-	// Group words by X position
-	type xGroup struct {
-		x     float64
-		texts []string
+// groupWordsByX groups words by their rounded X position.
+// Words at the same X position (within tolerance) are collected into the same group.
+func groupWordsByX(words []PDFWord) []xGroup {
+	if len(words) == 0 {
+		return nil
 	}
 	var groups []xGroup
 	var lastX float64
 	var currentGroup *xGroup
 
-	for _, w := range row.Words {
+	for _, w := range words {
 		xKey := roundX(w.X)
 		if currentGroup == nil || abs(xKey-lastX) > 0.5 {
 			groups = append(groups, xGroup{x: xKey})
@@ -220,6 +215,28 @@ func RowToLine(row PDFRow) string {
 		}
 		currentGroup.texts = append(currentGroup.texts, w.Text)
 	}
+	return groups
+}
+
+// isLowerLetter checks if a rune is a lowercase Latin letter.
+func isLowerLetter(r rune) bool {
+	return r >= 'a' && r <= 'z'
+}
+
+// IsUpperLetter checks if a rune is an uppercase Latin letter.
+func IsUpperLetter(r rune) bool {
+	return r >= 'A' && r <= 'Z'
+}
+
+// RowToLine converts a PDFRow to a single line string.
+// Characters at the same X position (within tolerance) are joined without spaces,
+// since they belong to the same visual token. Different X groups are separated by spaces.
+func RowToLine(row PDFRow) string {
+	if len(row.Words) == 0 {
+		return ""
+	}
+
+	groups := groupWordsByX(row.Words)
 
 	// Join each group without spaces, separate groups with spaces
 	var parts []string
@@ -246,38 +263,6 @@ func RowsToLines(rows []PDFRow) []string {
 	return lines
 }
 
-// ExtractTableRows extracts tabular data from PDF rows.
-// It identifies table rows by looking for consistent column positions.
-func ExtractTableRows(rows []PDFRow, startPattern string) [][]string {
-	var tableRows [][]string
-	inTable := false
-
-	for _, row := range rows {
-		line := RowToLine(row)
-
-		// Detect table start
-		if !inTable && strings.Contains(line, startPattern) {
-			inTable = true
-			continue
-		}
-
-		// Detect table end (empty row or next section)
-		if inTable && len(row.Words) == 0 {
-			break
-		}
-
-		if inTable {
-			var cells []string
-			for _, w := range row.Words {
-				cells = append(cells, w.Text)
-			}
-			tableRows = append(tableRows, cells)
-		}
-	}
-
-	return tableRows
-}
-
 // ColumnBoundary represents a column's X range for position-based extraction.
 type ColumnBoundary struct {
 	Name  string
@@ -299,23 +284,7 @@ func FindColumnPositions(headerRow PDFRow, columnNames []string) []ColumnBoundar
 	}
 
 	// Step 1: Group header words by X position (using roundX tolerance)
-	type xGroup struct {
-		x     float64
-		texts []string
-	}
-	var groups []xGroup
-	var lastX float64
-	var currentGroup *xGroup
-
-	for _, w := range headerRow.Words {
-		xKey := roundX(w.X)
-		if currentGroup == nil || abs(xKey-lastX) > 0.5 {
-			groups = append(groups, xGroup{x: xKey})
-			currentGroup = &groups[len(groups)-1]
-			lastX = xKey
-		}
-		currentGroup.texts = append(currentGroup.texts, w.Text)
-	}
+	groups := groupWordsByX(headerRow.Words)
 
 	if len(groups) == 0 {
 		return nil
@@ -400,23 +369,7 @@ func ExtractColumnsFromRow(row PDFRow, boundaries []ColumnBoundary) map[string]s
 		}
 
 		// Group words by X position (same logic as RowToLine)
-		type xGroup struct {
-			x     float64
-			texts []string
-		}
-		var groups []xGroup
-		var lastX float64
-		var currentGroup *xGroup
-
-		for _, w := range colWords {
-			xKey := roundX(w.X)
-			if currentGroup == nil || abs(xKey-lastX) > 0.5 {
-				groups = append(groups, xGroup{x: xKey})
-				currentGroup = &groups[len(groups)-1]
-				lastX = xKey
-			}
-			currentGroup.texts = append(currentGroup.texts, w.Text)
-		}
+		groups := groupWordsByX(colWords)
 
 		// Join each group without spaces, then apply smart word splitting
 		var parts []string

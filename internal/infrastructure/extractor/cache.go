@@ -85,7 +85,8 @@ func (c *CacheManager) buildPath(npm string, docType string, filename string) st
 	return filepath.Join(c.baseDir, npm, docType, filename)
 }
 
-// MarshalJSON marshals data to JSON with indentation.
+// MarshalJSON marshals a value to indented JSON.
+// Used by ExtractionParser interface to serialize extraction results.
 func MarshalJSON(v interface{}) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ")
 }

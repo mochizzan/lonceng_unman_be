@@ -9,24 +9,6 @@ import (
 	"lonceng_unman_be/internal/domain/entity"
 )
 
-// indonesianMonthsKHS maps Indonesian month names to English for date parsing.
-// Kept as separate var from krs_parser to avoid redeclaration in same package.
-var indonesianMonthsKHS = map[string]string{
-	"Januari": "January", "Februari": "February", "Maret": "March",
-	"April": "April", "Mei": "May", "Juni": "June",
-	"Juli": "July", "Agustus": "August", "September": "September",
-	"Oktober": "October", "November": "November", "Desember": "December",
-}
-
-// dateFormatsKHS lists Go time.Parse formats to try for Indonesian dates.
-var dateFormatsKHS = []string{"2 January 2006", "02 January 2006", "January 2, 2006"}
-
-// dateOutputFormatKHS is the ISO date format used for output.
-const dateOutputFormatKHS = "2006-01-02"
-
-// MaxSKSKHS is the maximum plausible SKS credit value.
-const MaxSKSKHS = 12
-
 // ParseKHS extracts structured KHS data from a PDF file.
 // It uses ReadPDF (plain text) for header fields to preserve word spacing,
 // and ReadPDFWithPosition for table data that needs column positions.
@@ -47,7 +29,8 @@ func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*en
 	// Use plain text for header fields (preserves spaces)
 	plainText, err := ReadPDF(path)
 	if err == nil {
-		parsePlainTextHeaderKHS(plainText, result)
+		lines := strings.Split(plainText, "\n")
+		parsePlainTextHeaderKHS(lines, result)
 	}
 
 	// Use position-based extraction for table data
@@ -72,40 +55,14 @@ func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*en
 }
 
 // parsePlainTextHeaderKHS extracts header fields from plain text output.
-// gopdf produces horizontal format: "Label : Value" on one line,
-// while the old library produced vertical format (label/colon/value on separate lines).
-// This function handles both formats.
-func parsePlainTextHeaderKHS(text string, result *entity.KHSExtraction) {
-	lines := strings.Split(text, "\n")
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		// Handle horizontal format: "Label : Value"
-		if strings.Contains(trimmed, ":") {
-			parts := strings.SplitN(trimmed, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			label := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			if value == "" {
-				continue
-			}
-
-			switch label {
-			case "Nama":
-				result.KHS.Mahasiswa.Nama = value
-			case "NPM":
-				result.KHS.Mahasiswa.NPM = value
-			case "Program Studi":
-				result.KHS.Mahasiswa.ProgramStudi = value
-			}
-		}
-	}
+// It delegates to parseHeaderFields which handles both horizontal
+// ("Label : Value") and vertical (label/colon/value) formats.
+func parsePlainTextHeaderKHS(lines []string, result *entity.KHSExtraction) {
+	labels := []string{"N P M", "Nama", "Program Studi"}
+	fields := parseHeaderFields(lines, labels)
+	result.KHS.Mahasiswa.NPM = fields["N P M"]
+	result.KHS.Mahasiswa.Nama = fields["Nama"]
+	result.KHS.Mahasiswa.ProgramStudi = fields["Program Studi"]
 }
 
 // khsColumnNames defines the expected column headers for KHS table extraction.
@@ -251,46 +208,12 @@ func parseKHSRekapitulasi(lines []string, result *entity.KHSExtraction) {
 }
 
 // parseKHSPenerbitan extracts publication info from KHS.
-// Handles formats: "Subang, 06 Agustus 2026", "Dikeluarkan di Subang, 06 Agustus 2026"
+// Delegates to parsePenerbitanFromLines which handles both formats:
+// "Subang, 06 Agustus 2026" and "Dikeluarkan di Subang, 06 Agustus 2026"
 func parseKHSPenerbitan(lines []string, result *entity.KHSExtraction) {
-	for _, line := range lines {
-		if !strings.Contains(line, ",") {
-			continue
-		}
-
-		parts := strings.SplitN(line, ",", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		tempat := strings.TrimSpace(parts[0])
-		dateStr := strings.TrimSpace(parts[1])
-
-		// Check if the second part contains a month name (Indonesian)
-		monthFound := false
-		for indo, eng := range indonesianMonthsKHS {
-			if strings.Contains(dateStr, indo) {
-				dateStr = strings.Replace(dateStr, indo, eng, 1)
-				monthFound = true
-				break
-			}
-		}
-		if !monthFound {
-			continue
-		}
-
-		// Try to parse the date
-		for _, format := range dateFormatsKHS {
-			if t, err := time.Parse(format, dateStr); err == nil {
-				result.KHS.Penerbitan.Tempat = tempat
-				result.KHS.Penerbitan.Tanggal = t.Format(dateOutputFormatKHS)
-				break
-			}
-		}
-
-		if result.KHS.Penerbitan.Tempat != "" && result.KHS.Penerbitan.Tanggal != "" {
-			break
-		}
-	}
+	p := parsePenerbitanFromLines(lines)
+	result.KHS.Penerbitan.Tempat = p.Tempat
+	result.KHS.Penerbitan.Tanggal = p.Tanggal
 }
 
 // parseKHSPersetujuan extracts approval section from KHS.
@@ -299,17 +222,10 @@ func parseKHSPersetujuan(lines []string, result *entity.KHSExtraction) {
 		normalized := NormalizeLabel(line)
 		if strings.Contains(normalized, "Dekan") && strings.Contains(normalized, "Fakultas") {
 			result.KHS.Persetujuan.Dekan.Jabatan = line
-			// Look for name in next lines
-			for j := i + 1; j < len(lines) && j < i+5; j++ {
-				if strings.TrimSpace(lines[j]) != "" &&
-					!strings.Contains(lines[j], "NIDN") &&
-					!strings.Contains(lines[j], "(") {
-					name := strings.TrimSpace(lines[j])
-					result.KHS.Persetujuan.Dekan.Nama = name
-					break
-				}
-			}
-			// Look for NIDN
+			result.KHS.Persetujuan.Dekan.Nama = extractNextNonEmptyAfterLabel(lines, i, func(s string) bool {
+				return true
+			})
+			// Extract NIDN
 			for j := i + 1; j < len(lines) && j < i+5; j++ {
 				if strings.Contains(lines[j], "NIDN") {
 					parts := strings.SplitN(lines[j], ":", 2)
