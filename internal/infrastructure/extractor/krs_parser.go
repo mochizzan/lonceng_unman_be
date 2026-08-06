@@ -34,51 +34,107 @@ func ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
 	return result, nil
 }
 
+// NormalizeLabel strips spaces between single characters to handle "N P M" → "NPM".
+func NormalizeLabel(s string) string {
+	// Remove spaces between single uppercase letters (e.g., "N P M" → "NPM")
+	var result strings.Builder
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == ' ' && i > 0 && i+1 < len(runes) {
+			// Check if surrounded by single uppercase letters
+			if IsUpperLetter(runes[i-1]) && IsUpperLetter(runes[i+1]) {
+				continue // skip this space
+			}
+		}
+		result.WriteRune(runes[i])
+	}
+	return result.String()
+}
+
+// IsUpperLetter checks if a rune is an uppercase Latin letter.
+func IsUpperLetter(r rune) bool {
+	return r >= 'A' && r <= 'Z'
+}
+
+// FindNextValueLine looks for a value starting with ":" in the next few lines.
+// Returns the trimmed value after ":", or empty string if not found.
+func FindNextValueLine(lines []string, startIdx int) string {
+	for j := startIdx + 1; j < len(lines) && j < startIdx+3; j++ {
+		nextLine := strings.TrimSpace(lines[j])
+		if strings.HasPrefix(nextLine, ":") {
+			return strings.TrimSpace(strings.TrimPrefix(nextLine, ":"))
+		}
+	}
+	return ""
+}
+
 // parseKRSHeader extracts student info and period from header section.
 func parseKRSHeader(lines []string, result *entity.KRSExtraction) {
 	for i, line := range lines {
-		// Look for student name pattern: "Nama : XXXX"
-		if strings.Contains(line, "Nama") && strings.Contains(line, ":") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				result.KRS.Mahasiswa.Nama = strings.TrimSpace(parts[1])
-			}
-		}
+		normalized := NormalizeLabel(line)
 
-		// Look for NPM pattern: "NPM : XXXX"
-		if strings.Contains(line, "NPM") && strings.Contains(line, ":") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				npm := strings.TrimSpace(parts[1])
-				if npm != "" {
-					result.KRS.Mahasiswa.NPM = npm
+		// Look for student name pattern: "Nama : XXXX" or "Nama" + next line ": XXXX"
+		if strings.Contains(normalized, "Nama") {
+			if strings.Contains(line, ":") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					result.KRS.Mahasiswa.Nama = strings.TrimSpace(parts[1])
 				}
+			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KRS.Mahasiswa.Nama = val
 			}
 		}
 
-		// Look for program studi: "Program Studi : XXXX"
-		if strings.Contains(line, "Program Studi") && strings.Contains(line, ":") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				result.KRS.Mahasiswa.ProgramStudi = strings.TrimSpace(parts[1])
+		// Look for NPM pattern: "NPM : XXXX" or "N P M" + next line ": XXXX"
+		if strings.Contains(normalized, "NPM") {
+			if strings.Contains(line, ":") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					npm := strings.TrimSpace(parts[1])
+					if npm != "" {
+						result.KRS.Mahasiswa.NPM = npm
+					}
+				}
+			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KRS.Mahasiswa.NPM = val
+			}
+		}
+
+		// Look for program studi: "Program Studi : XXXX" or "Program Studi" + next line ": XXXX"
+		if strings.Contains(normalized, "Program Studi") {
+			if strings.Contains(line, ":") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					result.KRS.Mahasiswa.ProgramStudi = strings.TrimSpace(parts[1])
+				}
+			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KRS.Mahasiswa.ProgramStudi = val
 			}
 		}
 
 		// Look for tahun ajaran: "Tahun Ajaran : 2025/2026"
-		if strings.Contains(line, "Tahun Ajaran") && strings.Contains(line, ":") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				result.KRS.Periode.TahunAjaran = strings.TrimSpace(parts[1])
+		if strings.Contains(normalized, "Tahun Ajaran") {
+			if strings.Contains(line, ":") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					result.KRS.Periode.TahunAjaran = strings.TrimSpace(parts[1])
+				}
+			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KRS.Periode.TahunAjaran = val
 			}
 		}
 
-		// Look for semester: "Semester : GENAP"
-		if i > 0 && strings.Contains(line, "Semester") && strings.Contains(line, ":") {
+		// Look for semester: "Semester : GENAP" or "Semester" + next line ": GENAP"
+		if i > 0 && strings.Contains(normalized, "Semester") {
 			// Avoid matching "Semester" in table headers
 			if !strings.Contains(lines[i-1], "Mata Kuliah") {
-				parts := strings.SplitN(line, ":", 2)
-				if len(parts) == 2 {
-					result.KRS.Periode.Semester = strings.TrimSpace(parts[1])
+				if strings.Contains(line, ":") {
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) == 2 {
+						result.KRS.Periode.Semester = strings.TrimSpace(parts[1])
+					}
+				} else if val := FindNextValueLine(lines, i); val != "" {
+					result.KRS.Periode.Semester = val
 				}
 			}
 		}

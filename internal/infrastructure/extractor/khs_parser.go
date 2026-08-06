@@ -39,31 +39,45 @@ func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*en
 
 // parseKHSHeader extracts student info from header section.
 func parseKHSHeader(lines []string, result *entity.KHSExtraction) {
-	for _, line := range lines {
-		// Look for student name pattern: "Nama : XXXX"
-		if strings.Contains(line, "Nama") && strings.Contains(line, ":") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				result.KHS.Mahasiswa.Nama = strings.TrimSpace(parts[1])
-			}
-		}
+	for i, line := range lines {
+		normalized := NormalizeLabel(line)
 
-		// Look for NPM pattern: "NPM : XXXX"
-		if strings.Contains(line, "NPM") && strings.Contains(line, ":") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				npm := strings.TrimSpace(parts[1])
-				if npm != "" {
-					result.KHS.Mahasiswa.NPM = npm
+		// Look for student name pattern: "Nama : XXXX" or "Nama" + next line ": XXXX"
+		if strings.Contains(normalized, "Nama") {
+			if strings.Contains(line, ":") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					result.KHS.Mahasiswa.Nama = strings.TrimSpace(parts[1])
 				}
+			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KHS.Mahasiswa.Nama = val
 			}
 		}
 
-		// Look for program studi: "Program Studi : XXXX"
-		if strings.Contains(line, "Program Studi") && strings.Contains(line, ":") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				result.KHS.Mahasiswa.ProgramStudi = strings.TrimSpace(parts[1])
+		// Look for NPM pattern: "NPM : XXXX" or "N P M" + next line ": XXXX"
+		if strings.Contains(normalized, "NPM") {
+			if strings.Contains(line, ":") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					npm := strings.TrimSpace(parts[1])
+					if npm != "" {
+						result.KHS.Mahasiswa.NPM = npm
+					}
+				}
+			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KHS.Mahasiswa.NPM = val
+			}
+		}
+
+		// Look for program studi: "Program Studi : XXXX" or "Program Studi" + next line ": XXXX"
+		if strings.Contains(normalized, "Program Studi") {
+			if strings.Contains(line, ":") {
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					result.KHS.Mahasiswa.ProgramStudi = strings.TrimSpace(parts[1])
+				}
+			} else if val := FindNextValueLine(lines, i); val != "" {
+				result.KHS.Mahasiswa.ProgramStudi = val
 			}
 		}
 	}
