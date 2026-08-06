@@ -85,37 +85,37 @@ func New() (*Config, error) {
 // Validate checks that all configuration values are within acceptable ranges.
 func (c *Config) Validate() error {
 	if c.App.Name == "" {
-		return fmt.Errorf("APP_NAME must not be empty")
+		return fmt.Errorf("app_name must not be empty")
 	}
 
 	validEnvs := map[string]bool{"development": true, "staging": true, "production": true}
 	if !validEnvs[c.App.Env] {
-		return fmt.Errorf("APP_ENV must be one of: development, staging, production; got %q", c.App.Env)
+		return fmt.Errorf("app_env must be one of: development, staging, production; got %q", c.App.Env)
 	}
 
 	port, err := strconv.Atoi(c.App.Port)
 	if err != nil || port < 1 || port > 65535 {
-		return fmt.Errorf("APP_PORT must be a valid port number (1-65535); got %q", c.App.Port)
+		return fmt.Errorf("app_port must be a valid port number (1-65535); got %q", c.App.Port)
 	}
 
 	if c.App.Host == "" {
-		return fmt.Errorf("APP_HOST must not be empty")
+		return fmt.Errorf("app_host must not be empty")
 	}
 
 	if c.App.BrowserTimeout <= 0 {
-		return fmt.Errorf("BROWSER_TIMEOUT must be a positive duration; got %v", c.App.BrowserTimeout)
+		return fmt.Errorf("browser_timeout must be a positive duration; got %v", c.App.BrowserTimeout)
 	}
 
 	if c.App.ActionTimeout <= 0 {
-		return fmt.Errorf("ACTION_TIMEOUT must be a positive duration; got %v", c.App.ActionTimeout)
+		return fmt.Errorf("action_timeout must be a positive duration; got %v", c.App.ActionTimeout)
 	}
 
 	if c.App.DownloadDir == "" {
-		return fmt.Errorf("DOWNLOAD_DIR must not be empty")
+		return fmt.Errorf("download_dir must not be empty")
 	}
 
 	if c.App.ExtractDir == "" {
-		return fmt.Errorf("EXTRACT_DIR must not be empty")
+		return fmt.Errorf("extract_dir must not be empty")
 	}
 
 	return nil

@@ -62,6 +62,32 @@ type KHSSemestersResult struct {
 	Timestamp time.Time     `json:"timestamp"`
 }
 
+// Semester values for academic periods.
+const (
+	SemesterGanjil = "GANJIL"
+	SemesterGenap  = "GENAP"
+)
+
+// ValidSemester checks if a string is a recognized semester value.
+func ValidSemester(s string) bool {
+	return s == SemesterGanjil || s == SemesterGenap
+}
+
+// Document type identifiers for KRS and KHS.
+const (
+	DocTypeKRS = "krs"
+	DocTypeKHS = "khs"
+)
+
+// File extension constants.
+const (
+	ExtPDF  = ".pdf"
+	ExtJSON = ".json"
+)
+
+// KRSFilePrefix is the prefix for KRS semester filenames (e.g. "semester_7.pdf").
+const KRSFilePrefix = "semester_"
+
 // KHSFilename generates the canonical KHS PDF filename.
 // Format: {TahunAjaran}_{Semester}.pdf where "/" in TahunAjaran is replaced with "_".
 // Example: KHSFilename("2022/2023", "GANJIL") -> "2022_2023_GANJIL.pdf"

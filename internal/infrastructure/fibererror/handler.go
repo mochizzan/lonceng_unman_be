@@ -47,6 +47,13 @@ func New() fiber.ErrorHandler {
 		case errors.As(err, &fiberErr):
 			code = fiberErr.Code
 			message = fiberErr.Message
+			slog.Warn(
+				"fiber error",
+				"method", c.Method(),
+				"path", c.Path(),
+				"status", code,
+				"message", message,
+			)
 		default:
 			slog.Error(
 				"unhandled error",
