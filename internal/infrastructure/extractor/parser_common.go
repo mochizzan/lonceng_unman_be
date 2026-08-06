@@ -92,6 +92,9 @@ type Penerbitan struct {
 //   - "Subang, 06 Agustus 2026"
 //   - "Dikeluarkan di Subang, 06 Agustus 2026"
 //
+// Output timezone is always WIB (+07:00) since Indonesian academic documents
+// are in Western Indonesia timezone.
+//
 // Returns empty Penerbitan if not found.
 func parsePenerbitanFromLines(lines []string) Penerbitan {
 	for _, line := range lines {
@@ -119,9 +122,12 @@ func parsePenerbitanFromLines(lines []string) Penerbitan {
 			continue
 		}
 
-		// Try to parse the date
+		// Try to parse the date, then add WIB timezone
 		for _, format := range dateFormats {
 			if t, err := time.Parse(format, dateStr); err == nil {
+				// Add WIB offset (+07:00) since the date has no timezone info
+				wib, _ := time.LoadLocation("Asia/Jakarta")
+				t = t.In(wib)
 				return Penerbitan{
 					Tempat:  tempat,
 					Tanggal: t.Format(dateOutputFormat),
