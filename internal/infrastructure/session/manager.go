@@ -1,8 +1,11 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -148,8 +151,41 @@ func (m *Manager) Stop() {
 	close(m.stopCh)
 }
 
+// checkDNS verifies that the LMS hostname resolves before we attempt a
+// browser connection. A broken DNS resolver (common after PC restart when
+// the OS DNS cache is cleared) would otherwise cause a 30 s timeout
+// inside go-rod with no actionable error message.
+func (m *Manager) checkDNS(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("DNS check: invalid LMS URL %q: %w", rawURL, err)
+	}
+	host := u.Hostname()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resolver := &net.Resolver{}
+	addrs, err := resolver.LookupHost(ctx, host)
+	if err != nil {
+		return fmt.Errorf(
+			"DNS check: cannot resolve LMS host %q: %w. "+
+				"Verify your DNS settings (try setting DNS to 8.8.8.8)",
+			host, err,
+		)
+	}
+	slog.Debug("DNS resolved", "host", host, "addrs", addrs)
+	return nil
+}
+
 // createSession launches a browser, logs in, and returns the cached session.
 func (m *Manager) createSession(npm, password string) (*cachedSession, error) {
+	// DNS pre-flight: fail fast if the LMS host is unreachable,
+	// avoiding a 30 s timeout when DNS is broken.
+	if err := m.checkDNS(m.cfg.App.LMSBaseURL); err != nil {
+		return nil, err
+	}
+
 	br := browserInfra.New()
 	if err := br.Connect(m.cfg.App.BrowserHeadless); err != nil {
 		return nil, fmt.Errorf("browser connect: %w", err)
