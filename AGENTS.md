@@ -12,6 +12,8 @@
 | **Project Type** | REST API Backend |
 | **Language** | Go 1.26.4 |
 | **Framework** | Fiber v3.4.0 |
+| **PDF Library** | razvandimescu/gopdf v0.9.5 |
+| **Browser Automation** | go-rod v0.116.2 |
 | **Architecture** | Clean Architecture (4-layer) |
 | **Development OS** | Windows 10 Pro (NOT Unix/Linux/Mac) |
 | **Shell / Bash** | Git Bash (MSYS2) — NOT WSL, NOT Ubuntu, NOT PowerShell |
@@ -183,7 +185,9 @@ internal/
 │   │   └── extraction.go             ← KRSExtraction, KHSExtraction, ExtractionResult
 │   └── port/
 │       ├── browser.go                ← BrowserSession interface
-│       └── session.go                ← SessionManager interface
+│       ├── session.go                ← SessionManager interface
+│       ├── extraction.go             ← PDFParser, ExtractionCache interfaces
+│       └── lms_config.go             ← LMSConfig interface
 ├── application/service/
 │   ├── health_service.go             ← HealthChecker interface + impl
 │   ├── lms_service.go                ← LMSLogin + LMSDocumentService interfaces + impl
@@ -207,11 +211,12 @@ internal/
     ├── session/
     │   ├── manager.go                ← In-memory session cache with TTL
     │   └── session.go                ← rodSession: thread-safe BrowserSession impl
-    └── extractor/
-        ├── pdf_reader.go             ← PDF text extraction with positional data
-        ├── krs_parser.go             ← Structured KRS extraction from PDF
-        ├── khs_parser.go             ← Structured KHS extraction from PDF
-        └── cache.go                  ← File-based extraction cache + MarshalJSON
+│   └── extractor/
+│       ├── pdf_reader.go             ← PDF text extraction with positional data
+│       ├── parser_common.go          ← Shared constants + helpers (KRS & KHS)
+│       ├── krs_parser.go             ← Structured KRS extraction from PDF (position-based)
+│       ├── khs_parser.go             ← Structured KHS extraction from PDF (position-based)
+│       └── cache.go                  ← File-based extraction cache + MarshalJSON
 tests/                                ← External test packages (mirrors internal/)
 ```
 
@@ -229,6 +234,7 @@ domain/entity ← application/service ← interfaces/http ← infrastructure
 - **Handlers** NEVER import `infrastructure/`
 - **Infrastructure** is only wired in `cmd/server/main.go`
 - **apperror** imports Fiber ONLY for HTTP status code constants
+- **`parserAdapter`** in `cmd/server/main.go` bridges application→infrastructure by implementing `port.PDFParser` and delegating to `extractor` package functions
 
 > **Note:** Two known dependency violations exist where the application layer imports
 > infrastructure packages directly (lms_service → infra/browser for URL paths/selectors,
@@ -243,9 +249,9 @@ Client Request
   → requestid middleware (inject trace_id)
   → logger middleware (request logging)
   → cors middleware (CORS headers)
-  → router dispatch (match /api/v1/<path>)
-  → handler method (e.g., HealthHandler.Check)
-  → service method (e.g., HealthChecker.Check)
+  → router dispatch (POST /api/v1/<path>, except GET /health)
+  → handler method (parse JSON body via c.Bind().JSON)
+  → service method (business logic)
   → entity response (domain data)
   → response.Success() envelope
   → JSON output: {"status":"success","data":{...},"message":"..."}
@@ -265,9 +271,10 @@ handler returns apperror.* → fibererror ErrorHandler
 
 ### File Naming
 
-- **Go source files**: `snake_case.go` (e.g., `health_service.go`, `apperror.go`)
+| **Go source files**: `snake_case.go` (e.g., `health_service.go`, `apperror.go`, `parser_common.go`)
 - **Test files**: `tests/<package>/<name>_test.go` (external test packages, separate from source)
 - **Package names**: single lowercase word (`config`, `entity`, `service`, `handler`, `response`)
+- **Parser files**: `parser_common.go` for shared constants/helpers across KRS and KHS parsers
 
 ### Error Handling
 
@@ -324,10 +331,12 @@ log.Error("failed to load config", "error", err)
 All config from environment variables with typed defaults. No hardcoding.
 
 ```go
-cfg.App.Name    // from APP_NAME (default: "lonceng_unman_be")
-cfg.App.Env     // from APP_ENV (default: "development")
-cfg.App.Port    // from APP_PORT (default: "3000")
-cfg.App.Host    // from APP_HOST (default: "0.0.0.0")
+cfg.App.Name       // from APP_NAME (default: "lonceng_unman_be")
+cfg.App.Env        // from APP_ENV (default: "development")
+cfg.App.Port       // from APP_PORT (default: "3000")
+cfg.App.Host       // from APP_HOST (default: "0.0.0.0")
+cfg.App.DownloadDir  // from DOWNLOAD_DIR (default: "./downloads")
+cfg.App.ExtractDir   // from EXTRACT_DIR (default: "./extracted")
 ```
 
 ### Testing
@@ -341,6 +350,7 @@ cfg.App.Host    // from APP_HOST (default: "0.0.0.0")
 var _ service.HealthChecker = service.NewHealthService(cfg)
 ```
 - Test packages use same package name (not `_test` suffix) but are functionally external (separate directory)
+- Parser tests include debug/structural tests (e.g., `debug_khs_structure_test.go`) for PDF layout analysis
 
 ### Middleware Order
 
