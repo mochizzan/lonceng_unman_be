@@ -326,7 +326,7 @@ func (m *Manager) createSession(npm, password string) (*cachedSession, error) {
 	// Perform login.
 	if err := m.login(page, npm, password); err != nil {
 		_ = br.Close()
-		return nil, fmt.Errorf("login: %w", err)
+		return nil, err
 	}
 
 	slog.Info("login successful", "npm", npm)
@@ -387,9 +387,9 @@ func (m *Manager) login(page *rod.Page, npm, password string) error {
 	if matched {
 		errorText, err := result.Text()
 		if err != nil {
-			return fmt.Errorf("login failed (could not read error text): %w", err)
+			return fmt.Errorf("read login error text: %w", err)
 		}
-		return fmt.Errorf("login failed: %s", errorText)
+		return fmt.Errorf("%s", errorText)
 	}
 
 	if err := page.WaitLoad(); err != nil {
@@ -405,7 +405,7 @@ func (m *Manager) login(page *rod.Page, npm, password string) error {
 		dashboardURL = "/admin/"
 	}
 	if !strings.Contains(info.URL, dashboardURL) {
-		return fmt.Errorf("login failed: page did not redirect to dashboard (url: %s)", info.URL)
+		return fmt.Errorf("page did not redirect to dashboard: %s", info.URL)
 	}
 
 	return nil
