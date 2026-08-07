@@ -181,6 +181,8 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 	slog.Info("KHS semesters found", "npm", req.NPM, "count", len(semesters))
 
 	return &entity.KHSSemestersResult{
+		Success:   true,
+		Message:   "KHS semesters retrieved",
 		NPM:       req.NPM,
 		Semesters: semesters,
 		Timestamp: time.Now(),

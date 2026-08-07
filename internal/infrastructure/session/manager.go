@@ -116,7 +116,7 @@ func (m *Manager) createSessionWithRestore(npm, password string, profileDir stri
 	br := browserInfra.New()
 	if err := br.ConnectWithProfile(m.cfg.App.BrowserHeadless, profileDir); err != nil {
 		slog.Warn("profile launch failed, falling back to full login",
-			"npm", npm, "err", err)
+			"npm", npm, "error", err)
 		return m.createSession(npm, password)
 	}
 
@@ -131,7 +131,7 @@ func (m *Manager) createSessionWithRestore(npm, password string, profileDir stri
 	}
 
 	if err := m.validateSession(page); err != nil {
-		slog.Info("restored session expired, performing full login",
+		slog.Warn("restored session expired, performing full login",
 			"npm", npm, "reason", err.Error())
 		_ = br.Close()
 		return m.createSession(npm, password)

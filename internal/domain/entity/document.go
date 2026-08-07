@@ -57,6 +57,8 @@ type KHSDownloadResult struct {
 
 // KHSSemestersResult represents the list of available KHS semesters.
 type KHSSemestersResult struct {
+	Success   bool          `json:"success"`
+	Message   string        `json:"message"`
 	NPM       string        `json:"npm"`
 	Semesters []KHSSemester `json:"semesters"`
 	Timestamp time.Time     `json:"timestamp"`
