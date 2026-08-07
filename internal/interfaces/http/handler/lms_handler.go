@@ -23,7 +23,7 @@ func NewLMSHandler(lmsService service.LMSLogin) *LMSHandler {
 func (h *LMSHandler) Login(c fiber.Ctx) error {
 	var req entity.LoginRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return apperror.BadRequest("invalid request body: " + err.Error())
+		return apperror.BadRequest("invalid request body")
 	}
 
 	if err := validateNPM(req.NPM); err != nil {

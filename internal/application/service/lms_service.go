@@ -60,10 +60,10 @@ func NewLMSDocumentService(cfg *config.Config, sessions port.SessionManager) LMS
 func (s *lmsService) Login(req entity.LoginRequest) (*entity.LoginResult, error) {
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
-		slog.Info("login failed", "npm", req.NPM, "err", err)
+		slog.Warn("login failed", "npm", req.NPM, "error", err)
 		return &entity.LoginResult{
 			Success:   false,
-			Message:   err.Error(),
+			Message:   "Username atau password salah",
 			NPM:       req.NPM,
 			Timestamp: time.Now(),
 		}, nil
@@ -181,6 +181,8 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 	slog.Info("KHS semesters found", "npm", req.NPM, "count", len(semesters))
 
 	return &entity.KHSSemestersResult{
+		Success:   true,
+		Message:   "KHS semesters retrieved",
 		NPM:       req.NPM,
 		Semesters: semesters,
 		Timestamp: time.Now(),

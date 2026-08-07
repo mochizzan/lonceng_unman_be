@@ -41,7 +41,7 @@ func validateNPM(npm string) error {
 func (h *DocumentHandler) DownloadKRS(c fiber.Ctx) error {
 	var req entity.KRSDownloadRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return apperror.BadRequest("invalid request body: " + err.Error())
+		return apperror.BadRequest("invalid request body")
 	}
 
 	if err := validateNPM(req.NPM); err != nil {
@@ -63,7 +63,7 @@ func (h *DocumentHandler) DownloadKRS(c fiber.Ctx) error {
 func (h *DocumentHandler) GetKHSSemesters(c fiber.Ctx) error {
 	var req entity.KHSSemestersRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return apperror.BadRequest("invalid request body: " + err.Error())
+		return apperror.BadRequest("invalid request body")
 	}
 
 	if err := validateNPM(req.NPM); err != nil {
@@ -78,14 +78,14 @@ func (h *DocumentHandler) GetKHSSemesters(c fiber.Ctx) error {
 		return apperror.Internal("fetch KHS semesters failed", err)
 	}
 
-	return response.Success(c, fiber.StatusOK, result, "KHS semesters retrieved")
+	return response.Success(c, fiber.StatusOK, result, result.Message)
 }
 
 // DownloadKHS handles POST /api/v1/lms/khs
 func (h *DocumentHandler) DownloadKHS(c fiber.Ctx) error {
 	var req entity.KHSDownloadRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return apperror.BadRequest("invalid request body: " + err.Error())
+		return apperror.BadRequest("invalid request body")
 	}
 
 	if err := validateNPM(req.NPM); err != nil {

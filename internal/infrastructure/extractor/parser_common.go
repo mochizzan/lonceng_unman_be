@@ -3,6 +3,8 @@ package extractor
 import (
 	"strings"
 	"time"
+
+	"lonceng_unman_be/internal/domain/entity"
 )
 
 // ============================================================
@@ -47,11 +49,49 @@ const MaxSKS = 12
 // Shared parsing helpers used by both KRS and KHS parsers.
 // ============================================================
 
+// NormalizeLabel normalizes a line for pattern matching.
+// It handles two cases:
+// 1. Collapses spaces between single uppercase letters: "N P M" → "NPM"
+// 2. Inserts spaces before uppercase letters after lowercase: "ProgramStudi" → "Program Studi"
+func NormalizeLabel(s string) string {
+	var result strings.Builder
+	runes := []rune(s)
+	for i, r := range runes {
+		// Skip spaces between single uppercase letters
+		if r == ' ' && i > 0 && i+1 < len(runes) {
+			if IsUpperLetter(runes[i-1]) && IsUpperLetter(runes[i+1]) {
+				continue
+			}
+		}
+
+		// Insert space before uppercase letter that follows a lowercase letter
+		if i > 0 && IsUpperLetter(r) && isLowerLetter(runes[i-1]) && runes[i-1] != ' ' {
+			result.WriteRune(' ')
+		}
+
+		result.WriteRune(r)
+	}
+	return result.String()
+}
+
+// splitTahunAjaran splits "2025/2026" into Awal/Akhir.
+func splitTahunAjaran(ta string) entity.TahunAjaran {
+	if ta == "" {
+		return entity.TahunAjaran{}
+	}
+	parts := strings.SplitN(ta, "/", 2)
+	if len(parts) == 2 {
+		return entity.TahunAjaran{
+			Awal:  strings.TrimSpace(parts[0]),
+			Akhir: strings.TrimSpace(parts[1]),
+		}
+	}
+	return entity.TahunAjaran{Awal: ta}
+}
+
 // parseHeaderFields extracts label-value pairs from plain text lines.
 // Lines are expected in "Label : Value" format.
 // Returns a map of label -> value for the requested labels.
-// The labels slice uses normalized forms (lowercase, single spaces)
-// for matching against the parsed lines.
 func parseHeaderFields(lines []string, labels []string) map[string]string {
 	result := make(map[string]string)
 
@@ -81,8 +121,8 @@ func parseHeaderFields(lines []string, labels []string) map[string]string {
 	return result
 }
 
-// Penerbitan is a generic publication info struct shared by KRS and KHS.
-type Penerbitan struct {
+// PenerbitanInfo is a generic publication info struct shared by KRS and KHS parsers.
+type PenerbitanInfo struct {
 	Tempat  string
 	Tanggal string
 }
@@ -95,8 +135,8 @@ type Penerbitan struct {
 // Output timezone is always WIB (+07:00) since Indonesian academic documents
 // are in Western Indonesia timezone.
 //
-// Returns empty Penerbitan if not found.
-func parsePenerbitanFromLines(lines []string) Penerbitan {
+// Returns empty PenerbitanInfo if not found.
+func parsePenerbitanFromLines(lines []string) PenerbitanInfo {
 	for _, line := range lines {
 		if !strings.Contains(line, ",") {
 			continue
@@ -128,7 +168,7 @@ func parsePenerbitanFromLines(lines []string) Penerbitan {
 				// Add WIB offset (+07:00) since the date has no timezone info
 				wib, _ := time.LoadLocation("Asia/Jakarta")
 				t = t.In(wib)
-				return Penerbitan{
+				return PenerbitanInfo{
 					Tempat:  tempat,
 					Tanggal: t.Format(dateOutputFormat),
 				}
@@ -136,7 +176,15 @@ func parsePenerbitanFromLines(lines []string) Penerbitan {
 		}
 	}
 
-	return Penerbitan{}
+	return PenerbitanInfo{}
+}
+
+// toEntityPenerbitan converts parser PenerbitanInfo to domain entity.Penerbitan.
+func toEntityPenerbitan(p PenerbitanInfo) entity.Penerbitan {
+	return entity.Penerbitan{
+		Tempat:  p.Tempat,
+		Tanggal: p.Tanggal,
+	}
 }
 
 // extractNextNonEmptyAfterLabel finds a label in lines and returns the next

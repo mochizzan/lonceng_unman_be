@@ -42,100 +42,84 @@ func NewExtractionService(downloadDir string, extractDir string, parser port.PDF
 	}
 }
 
+// verifySession ensures LMS credentials are valid before extraction.
+func (s *extractionService) verifySession(npm, password string) error {
+	if _, err := s.sessions.GetOrCreate(npm, password); err != nil {
+		return apperror.Unauthorized("Username atau password salah")
+	}
+	return nil
+}
+
+// saveParsed updates metadata, marshals to JSON, caches the result, and builds ExtractionResult.
+func (s *extractionService) saveParsed(
+	npm, docType, cacheFile, message, pdfPath string,
+	extraction interface{},
+	meta *entity.ExtractionMetadata,
+) (*entity.ExtractionResult, error) {
+	if fileInfo, err := os.Stat(pdfPath); err == nil {
+		meta.FileSize = int(fileInfo.Size())
+	}
+
+	data, err := s.parser.MarshalToJSON(extraction)
+	if err != nil {
+		return nil, fmt.Errorf("marshal json: %w", err)
+	}
+
+	if err := s.cache.Set(npm, docType, cacheFile, data); err != nil {
+		return nil, fmt.Errorf("save cache: %w", err)
+	}
+
+	return &entity.ExtractionResult{
+		Success:   true,
+		Message:   message,
+		NPM:       npm,
+		FilePath:  filepath.Join(s.extractDir, npm, docType, cacheFile),
+		Timestamp: time.Now(),
+	}, nil
+}
+
 // ExtractKRS extracts KRS data from the downloaded PDF.
 // Always re-extracts and overwrites existing cache.
 func (s *extractionService) ExtractKRS(npm string, password string) (*entity.ExtractionResult, error) {
-	// Verify LMS credentials before extraction
-	if _, err := s.sessions.GetOrCreate(npm, password); err != nil {
-		return nil, apperror.Unauthorized("LMS login failed: " + err.Error())
+	if err := s.verifySession(npm, password); err != nil {
+		return nil, err
 	}
 
-	// Find the KRS PDF file
 	pdfPath, err := s.findKRSFile(npm)
 	if err != nil {
 		return nil, fmt.Errorf("find krs file: %w", err)
 	}
 
-	// Parse PDF
 	extraction, err := s.parser.ParseKRS(pdfPath, npm)
 	if err != nil {
 		return nil, fmt.Errorf("parse krs: %w", err)
 	}
 
-	// Update metadata
-	fileInfo, _ := os.Stat(pdfPath)
-	if fileInfo != nil {
-		extraction.Metadata.FileSize = int(fileInfo.Size())
-	}
-
-	// Marshal to JSON
-	data, err := s.parser.MarshalToJSON(extraction)
-	if err != nil {
-		return nil, fmt.Errorf("marshal json: %w", err)
-	}
-
-	// Save to cache (overwrite if exists)
 	cacheFile := entity.KRSFilePrefix + s.getKRSSemester(pdfPath) + entity.ExtJSON
-	if err := s.cache.Set(npm, entity.DocTypeKRS, cacheFile, data); err != nil {
-		return nil, fmt.Errorf("save cache: %w", err)
-	}
-
-	return &entity.ExtractionResult{
-		Success:   true,
-		Message:   "KRS extracted successfully",
-		NPM:       npm,
-		FilePath:  filepath.Join(s.extractDir, npm, entity.DocTypeKRS, cacheFile),
-		Timestamp: time.Now(),
-	}, nil
+	return s.saveParsed(npm, entity.DocTypeKRS, cacheFile, "KRS extracted successfully", pdfPath, extraction, &extraction.Metadata)
 }
 
 // ExtractKHS extracts KHS data from the downloaded PDF.
 // Always re-extracts and overwrites existing cache.
 func (s *extractionService) ExtractKHS(npm string, password string, tahunAjaran string, semester string) (*entity.ExtractionResult, error) {
-	// Verify LMS credentials before extraction
-	if _, err := s.sessions.GetOrCreate(npm, password); err != nil {
-		return nil, apperror.Unauthorized("LMS login failed: " + err.Error())
+	if err := s.verifySession(npm, password); err != nil {
+		return nil, err
 	}
 
 	semester = strings.ToUpper(semester)
 
-	// Find the KHS PDF file
 	pdfPath, err := s.findKHSFile(npm, tahunAjaran, semester)
 	if err != nil {
 		return nil, fmt.Errorf("find khs file: %w", err)
 	}
 
-	// Parse PDF
 	extraction, err := s.parser.ParseKHS(pdfPath, npm, tahunAjaran, semester)
 	if err != nil {
 		return nil, fmt.Errorf("parse khs: %w", err)
 	}
 
-	// Update metadata
-	fileInfo, _ := os.Stat(pdfPath)
-	if fileInfo != nil {
-		extraction.Metadata.FileSize = int(fileInfo.Size())
-	}
-
-	// Marshal to JSON
-	data, err := s.parser.MarshalToJSON(extraction)
-	if err != nil {
-		return nil, fmt.Errorf("marshal json: %w", err)
-	}
-
-	// Save to cache (overwrite if exists)
 	cacheFile := s.khsCacheFilename(tahunAjaran, semester)
-	if err := s.cache.Set(npm, entity.DocTypeKHS, cacheFile, data); err != nil {
-		return nil, fmt.Errorf("save cache: %w", err)
-	}
-
-	return &entity.ExtractionResult{
-		Success:   true,
-		Message:   "KHS extracted successfully",
-		NPM:       npm,
-		FilePath:  filepath.Join(s.extractDir, npm, entity.DocTypeKHS, cacheFile),
-		Timestamp: time.Now(),
-	}, nil
+	return s.saveParsed(npm, entity.DocTypeKHS, cacheFile, "KHS extracted successfully", pdfPath, extraction, &extraction.Metadata)
 }
 
 // GetKRSExtraction retrieves cached KRS extraction.

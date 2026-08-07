@@ -63,7 +63,7 @@ type KHSDataRequest struct {
 func (h *ExtractionHandler) ExtractKRS(c fiber.Ctx) error {
 	var req KRSExtractionRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return apperror.BadRequest("invalid request body: " + err.Error())
+		return apperror.BadRequest("invalid request body")
 	}
 
 	// Validate required fields
@@ -97,7 +97,7 @@ func (h *ExtractionHandler) ExtractKRS(c fiber.Ctx) error {
 func (h *ExtractionHandler) ExtractKHS(c fiber.Ctx) error {
 	var req KHSExtractionRequest
 	if err := c.Bind().Body(&req); err != nil {
-		return apperror.BadRequest("invalid request body: " + err.Error())
+		return apperror.BadRequest("invalid request body")
 	}
 
 	// Validate required fields

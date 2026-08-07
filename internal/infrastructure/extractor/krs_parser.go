@@ -2,7 +2,6 @@ package extractor
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -16,14 +15,6 @@ var indonesianDays = []string{"Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabt
 // It uses ReadPDF (plain text) for header fields and table data to preserve word spacing,
 // and ReadPDFWithPosition as fallback for table data that needs column positions.
 func ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
-	// Validate file exists before parsing
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("pdf file not found: %s", path)
-		}
-		return nil, fmt.Errorf("stat pdf: %w", err)
-	}
-
 	result := &entity.KRSExtraction{}
 	result.KRS.Mahasiswa.NPM = npm
 
@@ -36,10 +27,16 @@ func ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
 
 	// Use position-based extraction for table data (works reliably with gopdf TextSpans)
 	rows, posErr := ReadPDFWithPosition(path)
-	if posErr == nil {
+	if posErr != nil {
+		// If plain text also failed, surface the position error
+		if err != nil {
+			return nil, fmt.Errorf("read pdf: %w", posErr)
+		}
+		// Header may still be usable; continue without table data
+	} else {
 		lines := RowsToLines(rows)
 		parseKRSMataKuliah(rows, lines, result)
-		parseKRSPenerbitan(lines, result)
+		result.KRS.Penerbitan = toEntityPenerbitan(parsePenerbitanFromLines(lines))
 		parseKRSPersetujuan(lines, result)
 	}
 
@@ -48,31 +45,6 @@ func ParseKRS(path string, npm string) (*entity.KRSExtraction, error) {
 	result.Metadata.SourceFile = path
 
 	return result, nil
-}
-
-// NormalizeLabel normalizes a line for pattern matching.
-// It handles two cases:
-// 1. Collapses spaces between single uppercase letters: "N P M" → "NPM"
-// 2. Inserts spaces before uppercase letters after lowercase: "ProgramStudi" → "Program Studi"
-func NormalizeLabel(s string) string {
-	var result strings.Builder
-	runes := []rune(s)
-	for i, r := range runes {
-		// Skip spaces between single uppercase letters
-		if r == ' ' && i > 0 && i+1 < len(runes) {
-			if IsUpperLetter(runes[i-1]) && IsUpperLetter(runes[i+1]) {
-				continue
-			}
-		}
-
-		// Insert space before uppercase letter that follows a lowercase letter
-		if i > 0 && IsUpperLetter(r) && isLowerLetter(runes[i-1]) && runes[i-1] != ' ' {
-			result.WriteRune(' ')
-		}
-
-		result.WriteRune(r)
-	}
-	return result.String()
 }
 
 // parsePlainTextHeaderKRS extracts header fields from plain text output.
@@ -84,17 +56,7 @@ func parsePlainTextHeaderKRS(lines []string, result *entity.KRSExtraction) {
 	result.KRS.Mahasiswa.Nama = fields["Nama"]
 	result.KRS.Mahasiswa.ProgramStudi = fields["Program Studi"]
 	result.KRS.Periode.Semester = fields["Semester"]
-
-	// Split tahun ajaran "2025/2026" into awal/akhir
-	if ta := fields["Tahun Ajaran"]; ta != "" {
-		parts := strings.SplitN(ta, "/", 2)
-		if len(parts) == 2 {
-			result.KRS.Periode.TahunAjaran.Awal = strings.TrimSpace(parts[0])
-			result.KRS.Periode.TahunAjaran.Akhir = strings.TrimSpace(parts[1])
-		} else {
-			result.KRS.Periode.TahunAjaran.Awal = ta
-		}
-	}
+	result.KRS.Periode.TahunAjaran = splitTahunAjaran(fields["Tahun Ajaran"])
 }
 
 // krsColumnNames defines the expected column headers for KRS table extraction.
@@ -103,8 +65,6 @@ var krsColumnNames = []string{"No", "Kode", "Mata Kuliah", "SKS", "KELAS", "DOSE
 // parseKRSMataKuliah extracts course table from KRS.
 // Uses column-position-based extraction: identifies column boundaries from the header row,
 // then scans ALL rows for course data (not dependent on row order).
-// This correctly handles PDFs where the library returns individual characters
-// and where rows may be in non-standard order (e.g., bottom-to-top).
 func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtraction) {
 	// Find the header row to identify column boundaries
 	var headerRow *PDFRow
@@ -128,7 +88,6 @@ func parseKRSMataKuliah(rows []PDFRow, lines []string, result *entity.KRSExtract
 	}
 
 	// Scan ALL rows for course data (not dependent on row order).
-	// A row is a course row if it has a valid Kode (alphanumeric course code).
 	var courses []entity.KRSMataKuliah
 	courseNo := 1
 	seenKodes := make(map[string]bool) // deduplicate courses
@@ -354,14 +313,6 @@ func isValidTime(s string) bool {
 	hour := parseIntSafe(s[:2])
 	min := parseIntSafe(s[3:])
 	return hour >= 0 && hour <= 23 && min >= 0 && min <= 59
-}
-
-// parseKRSPenerbitan extracts publication info from KRS.
-// Uses shared parsePenerbitanFromLines for date/city extraction.
-func parseKRSPenerbitan(lines []string, result *entity.KRSExtraction) {
-	p := parsePenerbitanFromLines(lines)
-	result.KRS.Penerbitan.Tempat = p.Tempat
-	result.KRS.Penerbitan.Tanggal = p.Tanggal
 }
 
 // parseKRSPersetujuan extracts approval section from KRS.
