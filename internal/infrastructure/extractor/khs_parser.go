@@ -2,7 +2,6 @@ package extractor
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -13,28 +12,10 @@ import (
 // It uses ReadPDF (plain text) for header fields to preserve word spacing,
 // and ReadPDFWithPosition for table data that needs column positions.
 func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*entity.KHSExtraction, error) {
-	// Validate file exists before parsing
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("pdf file not found: %s", path)
-		}
-		return nil, fmt.Errorf("stat pdf: %w", err)
-	}
-
 	result := &entity.KHSExtraction{}
 	result.KHS.Mahasiswa.NPM = npm
 	result.KHS.Periode.Semester = semester
-
-	// Split tahun ajaran "2025/2026" into awal/akhir
-	if tahunAjaran != "" {
-		parts := strings.SplitN(tahunAjaran, "/", 2)
-		if len(parts) == 2 {
-			result.KHS.Periode.TahunAjaran.Awal = strings.TrimSpace(parts[0])
-			result.KHS.Periode.TahunAjaran.Akhir = strings.TrimSpace(parts[1])
-		} else {
-			result.KHS.Periode.TahunAjaran.Awal = tahunAjaran
-		}
-	}
+	result.KHS.Periode.TahunAjaran = splitTahunAjaran(tahunAjaran)
 
 	// Use plain text for header fields (preserves spaces)
 	plainText, err := ReadPDF(path)
@@ -54,7 +35,7 @@ func ParseKHS(path string, npm string, tahunAjaran string, semester string) (*en
 	// Parse table and other sections
 	parseKHSMataKuliah(rows, lines, result)
 	parseKHSRekapitulasi(lines, result)
-	parseKHSPenerbitan(lines, result)
+	result.KHS.Penerbitan = toEntityPenerbitan(parsePenerbitanFromLines(lines))
 	parseKHSPersetujuan(lines, result)
 
 	// Set metadata
@@ -297,15 +278,6 @@ func parseKHSRekapitulasi(lines []string, result *entity.KHSExtraction) {
 			}
 		}
 	}
-}
-
-// parseKHSPenerbitan extracts publication info from KHS.
-// Delegates to parsePenerbitanFromLines which handles both formats:
-// "Subang, 06 Agustus 2026" and "Dikeluarkan di Subang, 06 Agustus 2026"
-func parseKHSPenerbitan(lines []string, result *entity.KHSExtraction) {
-	p := parsePenerbitanFromLines(lines)
-	result.KHS.Penerbitan.Tempat = p.Tempat
-	result.KHS.Penerbitan.Tanggal = p.Tanggal
 }
 
 // parseKHSPersetujuan extracts approval section from KHS.
