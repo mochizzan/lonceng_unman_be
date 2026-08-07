@@ -9,20 +9,29 @@ type ExtractionMetadata struct {
 	FileSize    int       `json:"file_size"`
 }
 
-// KRSMahasiswa represents student info in KRS.
-type KRSMahasiswa struct {
+// Mahasiswa represents shared student info used by both KRS and KHS.
+type Mahasiswa struct {
 	Nama         string `json:"nama"`
 	NPM          string `json:"npm"`
 	ProgramStudi string `json:"program_studi"`
 }
 
-// KRSPeriode represents the academic period in KRS.
-type KRSPeriode struct {
-	TahunAjaran struct {
-		Awal  string `json:"awal"`
-		Akhir string `json:"akhir"`
-	} `json:"tahun_ajaran"`
-	Semester string `json:"semester"`
+// TahunAjaran represents an academic year range (e.g. 2025/2026).
+type TahunAjaran struct {
+	Awal  string `json:"awal"`
+	Akhir string `json:"akhir"`
+}
+
+// Periode represents the academic period used by both KRS and KHS.
+type Periode struct {
+	TahunAjaran TahunAjaran `json:"tahun_ajaran"`
+	Semester    string      `json:"semester"`
+}
+
+// Penerbitan represents publication info used by both KRS and KHS.
+type Penerbitan struct {
+	Tempat  string `json:"tempat"`
+	Tanggal string `json:"tanggal"`
 }
 
 // KRSJadwal represents a class schedule in KRS.
@@ -55,39 +64,17 @@ type KRSPersetujuan struct {
 	} `json:"ketua_program_studi"`
 }
 
-// KRSPenerbitan represents publication info in KRS.
-type KRSPenerbitan struct {
-	Tempat  string `json:"tempat"`
-	Tanggal string `json:"tanggal"`
-}
-
 // KRSExtraction represents the full extracted KRS data.
 type KRSExtraction struct {
 	KRS struct {
-		Mahasiswa   KRSMahasiswa    `json:"mahasiswa"`
-		Periode     KRSPeriode      `json:"periode"`
+		Mahasiswa   Mahasiswa       `json:"mahasiswa"`
+		Periode     Periode         `json:"periode"`
 		MataKuliah  []KRSMataKuliah `json:"mata_kuliah"`
 		TotalSKS    int             `json:"total_sks"`
-		Penerbitan  KRSPenerbitan   `json:"penerbitan"`
+		Penerbitan  Penerbitan      `json:"penerbitan"`
 		Persetujuan KRSPersetujuan  `json:"persetujuan"`
 	} `json:"krs"`
 	Metadata ExtractionMetadata `json:"metadata"`
-}
-
-// KHSMahasiswa represents student info in KHS.
-type KHSMahasiswa struct {
-	Nama         string `json:"nama"`
-	NPM          string `json:"npm"`
-	ProgramStudi string `json:"program_studi"`
-}
-
-// KHSPeriode represents the academic period in KHS.
-type KHSPeriode struct {
-	TahunAjaran struct {
-		Awal  string `json:"awal"`
-		Akhir string `json:"akhir"`
-	} `json:"tahun_ajaran"`
-	Semester string `json:"semester"`
 }
 
 // KHSMataKuliah represents a course entry in KHS.
@@ -117,20 +104,14 @@ type KHSPersetujuan struct {
 	} `json:"dekan"`
 }
 
-// KHSPenerbitan represents publication info in KHS.
-type KHSPenerbitan struct {
-	Tempat  string `json:"tempat"`
-	Tanggal string `json:"tanggal"`
-}
-
 // KHSExtraction represents the full extracted KHS data.
 type KHSExtraction struct {
 	KHS struct {
-		Mahasiswa    KHSMahasiswa    `json:"mahasiswa"`
-		Periode      KHSPeriode      `json:"periode"`
+		Mahasiswa    Mahasiswa       `json:"mahasiswa"`
+		Periode      Periode         `json:"periode"`
 		MataKuliah   []KHSMataKuliah `json:"mata_kuliah"`
 		Rekapitulasi KHSRekapitulasi `json:"rekapitulasi"`
-		Penerbitan   KHSPenerbitan   `json:"penerbitan"`
+		Penerbitan   Penerbitan      `json:"penerbitan"`
 		Persetujuan  KHSPersetujuan  `json:"persetujuan"`
 	} `json:"khs"`
 	Metadata ExtractionMetadata `json:"metadata"`
