@@ -1,6 +1,7 @@
 package extractor
 
 import (
+	"strconv"
 	"testing"
 
 	"lonceng_unman_be/internal/domain/entity"
@@ -72,11 +73,11 @@ func buildKHSRows(courses []struct {
 
 		// Data row (the actual course line)
 		dataWords := []PDFWord{
-			{Text: intToStr(c.no), X: 10, Y: c.y},
+			{Text: strconv.Itoa(c.no), X: 10, Y: c.y},
 			{Text: c.kode, X: 60, Y: c.y},
-			{Text: intToStr(c.sks), X: 175, Y: c.y},
+			{Text: strconv.Itoa(c.sks), X: 175, Y: c.y},
 			{Text: c.nilai, X: 225, Y: c.y},
-			{Text: intToStr(c.mutu), X: 275, Y: c.y},
+			{Text: strconv.Itoa(c.mutu), X: 275, Y: c.y},
 		}
 		rows = append(rows, makeRow(c.y, dataWords))
 
@@ -89,22 +90,6 @@ func buildKHSRows(courses []struct {
 	}
 
 	return rows
-}
-
-// intToStr converts an int to string without importing strconv.
-func intToStr(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	if n < 0 {
-		return "-" + intToStr(-n)
-	}
-	digits := ""
-	for n > 0 {
-		digits = string(rune('0'+n%10)) + digits
-		n /= 10
-	}
-	return digits
 }
 
 // TestParseKHSMataKuliah_DuplicateCourseCodes verifies that courses sharing
