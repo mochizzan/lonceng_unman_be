@@ -103,7 +103,7 @@ func parseKHSMataKuliah(rows []PDFRow, lines []string, result *entity.KHSExtract
 	}
 
 	var courseEntries []courseEntry
-	seenKodes := make(map[string]bool)
+	seenNos := make(map[int]bool)
 
 	for i, row := range rows {
 		if i <= headerIdx {
@@ -151,13 +151,13 @@ func parseKHSMataKuliah(rows []PDFRow, lines []string, result *entity.KHSExtract
 			continue
 		}
 
+		no := parseIntSafe(cols["No"])
+
 		// Deduplicate
-		if seenKodes[kode] {
+		if seenNos[no] {
 			continue
 		}
-		seenKodes[kode] = true
-
-		no := parseIntSafe(cols["No"])
+		seenNos[no] = true
 		sks := parseIntSafe(cols["SKS"])
 		nilai := strings.ToUpper(strings.TrimSpace(cols["Nilai"]))
 		mutu := parseIntSafe(cols["Mutu"])
