@@ -3,7 +3,7 @@ package session
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
+	"time"
 
 	"lonceng_unman_be/internal/infrastructure/browser"
 
@@ -31,11 +31,19 @@ func newSession(cachedSess *cachedSession) *rodSession {
 	}
 }
 
+// touchLastUsed updates the lastUsed timestamp of the cached session.
+// Must be called while s.mu is held.
+func (s *rodSession) touchLastUsed() {
+	s.cachedSess.lastUsed = time.Now()
+}
+
 // Navigate loads the given URL and waits for the page to be ready.
 // It acquires the session mutex so only one request uses the page at a time.
 func (s *rodSession) Navigate(url string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.touchLastUsed()
 
 	if err := s.page.Navigate(url); err != nil {
 		return fmt.Errorf("navigate to %s: %w", url, err)
@@ -52,6 +60,8 @@ func (s *rodSession) Eval(js string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.touchLastUsed()
+
 	result, err := s.page.Eval(js)
 	if err != nil {
 		return "", fmt.Errorf("eval js: %w", err)
@@ -64,6 +74,8 @@ func (s *rodSession) Eval(js string) (string, error) {
 func (s *rodSession) ElementAttribute(selector, attr string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.touchLastUsed()
 
 	el, err := s.page.Element(selector)
 	if err != nil {
@@ -85,6 +97,8 @@ func (s *rodSession) ElementExists(selector string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.touchLastUsed()
+
 	_, err := s.page.Element(selector)
 	if err != nil {
 		// go-rod returns error when element not found
@@ -105,6 +119,8 @@ func (s *rodSession) DownloadPDF(url, savePath string) (string, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.touchLastUsed()
+
 	return browser.DownloadAndSave(s.page, url, savePath)
 }
 
@@ -112,7 +128,9 @@ func (s *rodSession) DownloadPDF(url, savePath string) (string, int, error) {
 // decrementing the active use count so the session can be evicted if needed.
 // The underlying browser and page are managed by the session manager.
 func (s *rodSession) Close() error {
-	atomic.AddInt32(&s.cachedSess.activeCount, -1)
+	s.mu.Lock()
+	s.cachedSess.activeCount--
+	s.mu.Unlock()
 	return nil
 }
 

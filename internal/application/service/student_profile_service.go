@@ -50,6 +50,7 @@ func (s *studentProfileService) Scrape(req entity.StudentProfileRequest) (*entit
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
+	defer session.Close()
 
 	// 2. Scrape profile (pass base URL for full navigation)
 	profile, err := s.scraper.Scrape(session, s.cfg.App.LMSBaseURL)

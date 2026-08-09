@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"lonceng_unman_be/internal/config"
@@ -19,6 +18,16 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
+)
+
+const (
+	// maxSessionLifetime adalah hard limit untuk session, terlepas dari aktivitas.
+	// Mencegah memory leak untuk session yang sangat lama aktif.
+	maxSessionLifetime = 2 * time.Hour
+
+	// gracePeriod adalah waktu tambahan untuk session yang sedang aktif
+	// sebelum di-force evict.
+	gracePeriod = 5 * time.Minute
 )
 
 // cachedSession holds an authenticated browser session for a single NPM.
@@ -30,8 +39,8 @@ type cachedSession struct {
 	browser     *browserInfra.Browser
 	createdAt   time.Time
 	lastUsed    time.Time
-	mu          sync.Mutex // guards page operations within this session
-	activeCount int32      // atomic: number of active rodSession holders
+	mu          sync.Mutex // guards page, lastUsed, AND activeCount
+	activeCount int32      // protected by mu, NOT atomic
 }
 
 // Manager is an in-memory session cache keyed by NPM.
@@ -158,8 +167,8 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 	if ok && time.Since(sess.lastUsed) < m.ttl {
 		sess.mu.Lock()
 		sess.lastUsed = time.Now()
+		sess.activeCount++
 		sess.mu.Unlock()
-		atomic.AddInt32(&sess.activeCount, 1)
 		slog.Info("session reused", "npm", npm)
 		return newSession(sess), nil
 	}
@@ -177,8 +186,8 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 	if ok && time.Since(sess.lastUsed) < m.ttl {
 		sess.mu.Lock()
 		sess.lastUsed = time.Now()
+		sess.activeCount++
 		sess.mu.Unlock()
-		atomic.AddInt32(&sess.activeCount, 1)
 		slog.Info("session reused (double-check)", "npm", npm)
 		return newSession(sess), nil
 	}
@@ -221,7 +230,7 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 	m.sessions[npm] = sess
 	m.mu.Unlock()
 
-	atomic.AddInt32(&sess.activeCount, 1)
+	sess.activeCount = 1 // Set directly since session is brand new
 	return newSession(sess), nil
 }
 
@@ -414,27 +423,31 @@ func (m *Manager) login(page *rod.Page, npm, password string) error {
 // evictOldest closes and removes the session with the oldest lastUsed time,
 // skipping any session that is currently in active use.
 func (m *Manager) evictOldest() {
-	m.mu.RLock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var oldestNPM string
 	var oldestTime time.Time
 	for npm, sess := range m.sessions {
-		if atomic.LoadInt32(&sess.activeCount) > 0 {
+		sess.mu.Lock()
+		isActive := sess.activeCount > 0
+		lastUsed := sess.lastUsed
+		sess.mu.Unlock()
+
+		if isActive {
 			continue
 		}
-		if oldestNPM == "" || sess.lastUsed.Before(oldestTime) {
+		if oldestNPM == "" || lastUsed.Before(oldestTime) {
 			oldestNPM = npm
-			oldestTime = sess.lastUsed
+			oldestTime = lastUsed
 		}
 	}
-	m.mu.RUnlock()
 
 	if oldestNPM == "" {
 		return
 	}
 
-	m.mu.RLock()
 	sess, ok := m.sessions[oldestNPM]
-	m.mu.RUnlock()
 	if !ok {
 		return
 	}
@@ -443,10 +456,7 @@ func (m *Manager) evictOldest() {
 	_ = sess.browser.Close()
 	sess.mu.Unlock()
 
-	m.mu.Lock()
 	delete(m.sessions, oldestNPM)
-	m.mu.Unlock()
-
 	slog.Info("evicted oldest session", "npm", oldestNPM)
 }
 
@@ -466,40 +476,60 @@ func (m *Manager) cleanupLoop() {
 }
 
 // cleanup removes all sessions that have exceeded the TTL.
-// Sessions with active users (activeCount > 0) are skipped.
+// Sessions with active users (activeCount > 0) are skipped unless hard limit hit.
 func (m *Manager) cleanup() {
-	// Step 1: Find expired sessions under read lock (fast).
-	m.mu.RLock()
+	m.mu.Lock()
 	now := time.Now()
 	var toEvict []string
 	for npm, sess := range m.sessions {
-		if now.Sub(sess.lastUsed) > m.ttl {
-			if atomic.LoadInt32(&sess.activeCount) > 0 {
-				slog.Info("session expired but still active, skipping", "npm", npm)
+		sess.mu.Lock()
+		isActive := sess.activeCount > 0
+		lastUsed := sess.lastUsed
+		createdAt := sess.createdAt
+		sess.mu.Unlock()
+
+		// Hard limit: force evict setelah maxSessionLifetime + gracePeriod
+		if now.Sub(createdAt) > maxSessionLifetime+gracePeriod {
+			if isActive {
+				slog.Warn("session hit hard limit but active, force evicting",
+					"npm", npm,
+					"age", now.Sub(createdAt).Round(time.Second))
+			}
+			toEvict = append(toEvict, npm)
+			continue
+		}
+
+		// Soft limit: TTL based on lastUsed + grace period untuk active sessions
+		if now.Sub(lastUsed) > m.ttl {
+			if isActive && now.Sub(lastUsed) < m.ttl+gracePeriod {
+				slog.Info("session expired but within grace period, skipping",
+					"npm", npm,
+					"inactive_duration", now.Sub(lastUsed).Round(time.Second))
 				continue
 			}
 			toEvict = append(toEvict, npm)
 		}
 	}
-	m.mu.RUnlock()
 
-	// Step 2: Close each expired session (outside of m.mu).
+	// Evict dalam satu critical section
 	for _, npm := range toEvict {
-		m.mu.RLock()
 		sess, ok := m.sessions[npm]
-		m.mu.RUnlock()
 		if !ok {
 			continue
 		}
 
+		// Double-check: pastikan masih expired dan tidak aktif
 		sess.mu.Lock()
+		if sess.activeCount > 0 || time.Since(sess.lastUsed) < m.ttl {
+			sess.mu.Unlock()
+			slog.Info("session revived before eviction, skipping", "npm", npm)
+			continue
+		}
 		_ = sess.browser.Close()
 		sess.mu.Unlock()
 
-		m.mu.Lock()
 		delete(m.sessions, npm)
-		m.mu.Unlock()
-
-		slog.Info("session expired and evicted", "npm", npm)
+		slog.Info("session evicted", "npm", npm)
 	}
+	m.mu.Unlock()
 }

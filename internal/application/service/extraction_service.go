@@ -44,9 +44,11 @@ func NewExtractionService(downloadDir string, extractDir string, parser port.PDF
 
 // verifySession ensures LMS credentials are valid before extraction.
 func (s *extractionService) verifySession(npm, password string) error {
-	if _, err := s.sessions.GetOrCreate(npm, password); err != nil {
+	session, err := s.sessions.GetOrCreate(npm, password)
+	if err != nil {
 		return apperror.Unauthorized("Username atau password salah")
 	}
+	session.Close() // Release session reference immediately
 	return nil
 }
 
