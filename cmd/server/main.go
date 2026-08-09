@@ -6,6 +6,7 @@ import (
 	"lonceng_unman_be/internal/application/service"
 	"lonceng_unman_be/internal/config"
 	"lonceng_unman_be/internal/domain/entity"
+	"lonceng_unman_be/internal/infrastructure/browser"
 	"lonceng_unman_be/internal/infrastructure/extractor"
 	"lonceng_unman_be/internal/infrastructure/fibererror"
 	"lonceng_unman_be/internal/infrastructure/logger"
@@ -53,6 +54,11 @@ func main() {
 	cache := extractor.NewCacheManager(cfg.App.ExtractDir)
 	extractionService := service.NewExtractionService(cfg.App.DownloadDir, cfg.App.ExtractDir, parser, cache, sessionMgr)
 
+	// Wire student profile scraper, service, and handler
+	studentProfileScraper := browser.NewStudentProfileScraper()
+	studentProfileService := service.NewStudentProfileService(cfg, sessionMgr, studentProfileScraper, cache)
+	studentProfileHandler := handler.NewStudentProfileHandler(studentProfileService)
+
 	// Wire HTTP handlers
 	healthHandler := handler.NewHealthHandler(healthService)
 	lmsHandler := handler.NewLMSHandler(lmsService)
@@ -60,7 +66,7 @@ func main() {
 	extractionHandler := handler.NewExtractionHandler(extractionService)
 
 	// Register routes
-	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler)
+	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler, studentProfileHandler)
 
 	// Start server
 	log.Info(

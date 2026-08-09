@@ -39,4 +39,7 @@ const (
 	// KHS URL paths
 	KHSListPath   = "/admin/main.php?op=mahasiswa_khs&act=cetak"
 	KHSDetailPath = "/admin/main.php?op=mahasiswa_khs&act=cetak_detail"
+
+	// Student Profile URL path
+	StudentProfilePath = "/admin/main.php?op=data_mahasiswa&act=viewupdate"
 )

@@ -7,7 +7,7 @@ import (
 )
 
 // Setup registers all application routes on the Fiber app.
-func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *handler.LMSHandler, docHandler *handler.DocumentHandler, extractionHandler *handler.ExtractionHandler) {
+func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *handler.LMSHandler, docHandler *handler.DocumentHandler, extractionHandler *handler.ExtractionHandler, studentProfileHandler *handler.StudentProfileHandler) {
 	v1 := app.Group("/api/v1")
 
 	// Health
@@ -26,4 +26,8 @@ func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *han
 	v1.Post("/lms/khs/extract", extractionHandler.ExtractKHS)
 	v1.Post("/lms/krs/data", extractionHandler.GetKRS)
 	v1.Post("/lms/khs/data", extractionHandler.GetKHS)
+
+	// Student Profile
+	v1.Post("/lms/student-profile", studentProfileHandler.Scrape)
+	v1.Post("/lms/student-profile/data", studentProfileHandler.Get)
 }
