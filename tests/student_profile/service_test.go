@@ -10,6 +10,7 @@ import (
 	"lonceng_unman_be/internal/config"
 	"lonceng_unman_be/internal/domain/entity"
 	"lonceng_unman_be/internal/domain/port"
+	"lonceng_unman_be/internal/infrastructure/photocache"
 )
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,10 @@ func (m *mockBrowserSession) ElementAttribute(sel, attr string) (string, error) 
 func (m *mockBrowserSession) ElementExists(sel string) (bool, error) { return true, nil }
 func (m *mockBrowserSession) ElementHref(sel string) (string, error) { return "", nil }
 func (m *mockBrowserSession) DownloadPDF(url, save string) (string, int, error) {
+	return "", 0, nil
+}
+
+func (m *mockBrowserSession) DownloadImage(url, save string) (string, int, error) {
 	return "", 0, nil
 }
 func (m *mockBrowserSession) Close() error { return nil }
@@ -156,7 +161,8 @@ func newTestService(
 	scraper port.StudentProfileScraper,
 	cache port.ExtractionCache,
 ) service.StudentProfileService {
-	return service.NewStudentProfileService(newTestConfig(), sessions, scraper, cache)
+	photoCache := photocache.New("/tmp/test_photos", 15*time.Minute)
+	return service.NewStudentProfileService(newTestConfig(), sessions, scraper, cache, photoCache)
 }
 
 var testReq = entity.StudentProfileRequest{

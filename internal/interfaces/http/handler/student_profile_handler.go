@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+
 	"lonceng_unman_be/internal/apperror"
 	"lonceng_unman_be/internal/application/service"
 	"lonceng_unman_be/internal/domain/entity"
@@ -59,4 +61,38 @@ func (h *StudentProfileHandler) Get(c fiber.Ctx) error {
 	}
 
 	return response.Success(c, fiber.StatusOK, profile, "Student profile retrieved")
+}
+
+// GetPhoto handles POST /api/v1/lms/student-profile/photo
+// Returns the photo as binary or 204 No Content if not found.
+func (h *StudentProfileHandler) GetPhoto(c fiber.Ctx) error {
+	var req entity.StudentProfileRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return apperror.BadRequest("invalid request body")
+	}
+
+	if err := validateNPM(req.NPM); err != nil {
+		return err
+	}
+
+	if req.Password == "" {
+		return apperror.BadRequest("password is required")
+	}
+
+	photoData, contentType, err := h.profileSvc.GetPhoto(req)
+	if err != nil {
+		return apperror.Internal("failed to get student photo", err)
+	}
+
+	// No photo found
+	if photoData == nil {
+		return c.SendStatus(fiber.StatusNoContent)
+	}
+
+	// Set headers for streaming + caching
+	c.Set("Content-Type", contentType)
+	c.Set("Content-Length", fmt.Sprintf("%d", len(photoData)))
+	c.Set("Cache-Control", "max-age=900") // 15 minutes
+
+	return c.Send(photoData)
 }

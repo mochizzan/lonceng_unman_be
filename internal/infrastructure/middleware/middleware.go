@@ -6,6 +6,7 @@ import (
 	"lonceng_unman_be/internal/config"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/compress"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
@@ -23,6 +24,11 @@ func Register(app *fiber.App, corsCfg config.CORSConfig) {
 
 	// Request logger (runs after requestid is set, so logs include the ID)
 	app.Use(logger.New())
+
+	// Gzip compression (after logger, before CORS)
+	app.Use(compress.New(compress.Config{
+		Level: compress.LevelDefault,
+	}))
 
 	// CORS
 	app.Use(cors.New(cors.Config{

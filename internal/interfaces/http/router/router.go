@@ -30,4 +30,5 @@ func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *han
 	// Student Profile
 	v1.Post("/lms/student-profile", studentProfileHandler.Scrape)
 	v1.Post("/lms/student-profile/data", studentProfileHandler.Get)
+	v1.Post("/lms/student-profile/photo", studentProfileHandler.GetPhoto)
 }

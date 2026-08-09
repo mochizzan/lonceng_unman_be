@@ -11,6 +11,7 @@ import (
 	"lonceng_unman_be/internal/infrastructure/fibererror"
 	"lonceng_unman_be/internal/infrastructure/logger"
 	"lonceng_unman_be/internal/infrastructure/middleware"
+	"lonceng_unman_be/internal/infrastructure/photocache"
 	"lonceng_unman_be/internal/infrastructure/session"
 	"lonceng_unman_be/internal/interfaces/http/handler"
 	"lonceng_unman_be/internal/interfaces/http/router"
@@ -57,7 +58,8 @@ func main() {
 
 	// Wire student profile scraper, service, and handler
 	studentProfileScraper := browser.NewStudentProfileScraper()
-	studentProfileService := service.NewStudentProfileService(cfg, sessionMgr, studentProfileScraper, cache)
+	photoCache := photocache.New(cfg.App.PhotoDir, cfg.App.PhotoCacheTTL)
+	studentProfileService := service.NewStudentProfileService(cfg, sessionMgr, studentProfileScraper, cache, photoCache)
 	studentProfileHandler := handler.NewStudentProfileHandler(studentProfileService)
 
 	// Wire HTTP handlers

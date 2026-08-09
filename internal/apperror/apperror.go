@@ -13,6 +13,8 @@ var (
 	ErrPDFNotFound = errors.New("PDF file not found")
 	// ErrExtractionNotFound indicates no cached extraction result exists.
 	ErrExtractionNotFound = errors.New("extraction not found")
+	// ErrPhotoNotFound indicates no photo was found on the dashboard.
+	ErrPhotoNotFound = errors.New("student photo not found")
 )
 
 // AppError is a structured error that separates public messages (safe to send

@@ -124,6 +124,17 @@ func (s *rodSession) DownloadPDF(url, savePath string) (string, int, error) {
 	return browser.DownloadAndSave(s.page, url, savePath)
 }
 
+// DownloadImage downloads an image from the given URL and saves it to savePath.
+// Delegates to browser.DownloadImage for the actual fetch and file I/O.
+func (s *rodSession) DownloadImage(url, savePath string) (string, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.touchLastUsed()
+
+	return browser.DownloadImage(s.page, url, savePath)
+}
+
 // Close signals that this session holder is done with the browser session,
 // decrementing the active use count so the session can be evicted if needed.
 // The underlying browser and page are managed by the session manager.
@@ -142,6 +153,7 @@ var _ interface {
 	ElementExists(string) (bool, error)
 	ElementHref(string) (string, error)
 	DownloadPDF(string, string) (string, int, error)
+	DownloadImage(string, string) (string, int, error)
 	Close() error
 } = (*rodSession)(nil)
 

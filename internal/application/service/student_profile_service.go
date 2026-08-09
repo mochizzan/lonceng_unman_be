@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	"lonceng_unman_be/internal/config"
 	"lonceng_unman_be/internal/domain/entity"
 	"lonceng_unman_be/internal/domain/port"
+	"lonceng_unman_be/internal/infrastructure/photocache"
 )
 
 // StudentProfileService defines the contract for student profile operations.
@@ -18,14 +21,19 @@ type StudentProfileService interface {
 
 	// Get retrieves cached student profile data.
 	Get(req entity.StudentProfileRequest) (*entity.StudentProfile, error)
+
+	// GetPhoto retrieves the student profile photo. Downloads from LMS if not cached.
+	// Returns (photoBytes, contentType, error). Returns (nil, "", nil) if no photo found.
+	GetPhoto(req entity.StudentProfileRequest) ([]byte, string, error)
 }
 
 // studentProfileService implements StudentProfileService.
 type studentProfileService struct {
-	cfg      *config.Config
-	sessions port.SessionManager
-	scraper  port.StudentProfileScraper
-	cache    port.ExtractionCache
+	cfg        *config.Config
+	sessions   port.SessionManager
+	scraper    port.StudentProfileScraper
+	cache      port.ExtractionCache
+	photoCache *photocache.PhotoCache
 }
 
 // NewStudentProfileService creates a StudentProfileService.
@@ -34,12 +42,14 @@ func NewStudentProfileService(
 	sessions port.SessionManager,
 	scraper port.StudentProfileScraper,
 	cache port.ExtractionCache,
+	photoCache *photocache.PhotoCache,
 ) StudentProfileService {
 	return &studentProfileService{
-		cfg:      cfg,
-		sessions: sessions,
-		scraper:  scraper,
-		cache:    cache,
+		cfg:        cfg,
+		sessions:   sessions,
+		scraper:    scraper,
+		cache:      cache,
+		photoCache: photoCache,
 	}
 }
 
@@ -99,6 +109,81 @@ func (s *studentProfileService) Get(req entity.StudentProfileRequest) (*entity.S
 	}
 
 	return &profile, nil
+}
+
+// GetPhoto retrieves student profile photo. Returns cached if valid, otherwise scrapes from LMS.
+func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]byte, string, error) {
+	// 1. Check cache first
+	photoPath, err := s.photoCache.Get(req.NPM)
+	if err != nil {
+		slog.Warn("failed to read photo cache", "npm", req.NPM, "error", err)
+		// Non-fatal — continue to scrape
+	}
+	if photoPath != "" {
+		data, err := os.ReadFile(photoPath)
+		if err == nil {
+			slog.Info("photo served from cache", "npm", req.NPM)
+			return data, "image/jpeg", nil
+		}
+	}
+
+	// 2. Get or create session (auto-login)
+	sess, err := s.sessions.GetOrCreate(req.NPM, req.Password)
+	if err != nil {
+		return nil, "", fmt.Errorf("get session: %w", err)
+	}
+	defer sess.Close()
+
+	// 3. Navigate to dashboard
+	dashboardURL := s.cfg.App.LMSBaseURL + "/admin/"
+	if err := sess.Navigate(dashboardURL); err != nil {
+		return nil, "", fmt.Errorf("navigate to dashboard: %w", err)
+	}
+
+	// 4. Wait for page load
+	time.Sleep(3 * time.Second)
+
+	// 5. Extract photo src via JS eval
+	jsCode := `(() => {
+		const img = document.querySelector('img[src*="uploads_foto"]');
+		if (!img) return '';
+		return img.getAttribute('src') || '';
+	})()`
+
+	src, err := sess.Eval(jsCode)
+	if err != nil {
+		return nil, "", fmt.Errorf("extract photo src: %w", err)
+	}
+
+	if src == "" {
+		// No photo found — return nil (handler will return 204)
+		slog.Info("no photo found on dashboard", "npm", req.NPM)
+		return nil, "", nil
+	}
+
+	// 6. Resolve full URL and download
+	photoURL := s.cfg.App.LMSBaseURL + "/admin/" + src
+	savePath := filepath.Join(s.cfg.App.PhotoDir, req.NPM+".jpg")
+	_, _, err = sess.DownloadImage(photoURL, savePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("download photo: %w", err)
+	}
+
+	// 7. Read downloaded photo
+	photoData, err := os.ReadFile(savePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("read downloaded photo: %w", err)
+	}
+
+	// 8. Save to cache (metadata)
+	if err := s.photoCache.Set(req.NPM, photoData, filepath.Base(src)); err != nil {
+		slog.Warn("failed to cache photo metadata", "npm", req.NPM, "error", err)
+		// Non-fatal — still return photo
+	}
+
+	slog.Info("photo downloaded and cached", "npm", req.NPM, "src", src)
+
+	return photoData, "image/jpeg", nil
 }
 
 // Compile-time interface check

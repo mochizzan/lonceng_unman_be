@@ -20,8 +20,9 @@ import (
 // --- mock service ---
 
 type mockStudentProfileService struct {
-	scrapeFunc func(req entity.StudentProfileRequest) (*entity.StudentProfileResult, error)
-	getFunc    func(req entity.StudentProfileRequest) (*entity.StudentProfile, error)
+	scrapeFunc   func(req entity.StudentProfileRequest) (*entity.StudentProfileResult, error)
+	getFunc      func(req entity.StudentProfileRequest) (*entity.StudentProfile, error)
+	getPhotoFunc func(req entity.StudentProfileRequest) ([]byte, string, error)
 }
 
 func (m *mockStudentProfileService) Scrape(req entity.StudentProfileRequest) (*entity.StudentProfileResult, error) {
@@ -43,6 +44,13 @@ func (m *mockStudentProfileService) Get(req entity.StudentProfileRequest) (*enti
 			NIM: req.NPM,
 		},
 	}, nil
+}
+
+func (m *mockStudentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]byte, string, error) {
+	if m.getPhotoFunc != nil {
+		return m.getPhotoFunc(req)
+	}
+	return nil, "", nil
 }
 
 // --- helpers ---

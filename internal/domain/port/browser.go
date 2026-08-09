@@ -22,6 +22,10 @@ type BrowserSession interface {
 	// Returns the filename and byte count.
 	DownloadPDF(url, savePath string) (string, int, error)
 
+	// DownloadImage downloads an image from the given URL and saves it to savePath.
+	// Returns the filename, byte count, and any error.
+	DownloadImage(url, savePath string) (string, int, error)
+
 	// Close releases the browser session resources.
 	Close() error
 }
