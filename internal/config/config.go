@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +40,6 @@ type AppConfig struct {
 	// Session Persistence
 	ProfileBaseDir string
 	// Photo Cache
-	PhotoDir      string
 	PhotoCacheTTL time.Duration
 }
 
@@ -76,7 +74,6 @@ func New() (*Config, error) {
 			ProfileBaseDir:  getEnv("PROFILE_BASE_DIR", "./profiles"),
 			MaxBodySize:     parseByteSize(getEnv("MAX_BODY_SIZE", "1MB")),
 			MaxPDFSize:      parseByteSize(getEnv("MAX_PDF_SIZE", "50MB")),
-			PhotoDir:        getEnv("PHOTO_DIR", filepath.Join(getEnv("DOWNLOAD_DIR", "./downloads"), "photos")),
 			PhotoCacheTTL:   getEnvDuration("PHOTO_CACHE_TTL", 15*time.Minute),
 		},
 		CORS: CORSConfig{
@@ -123,10 +120,6 @@ func (c *Config) Validate() error {
 
 	if c.App.ExtractDir == "" {
 		return fmt.Errorf("extract_dir must not be empty")
-	}
-
-	if c.App.PhotoDir == "" {
-		return fmt.Errorf("photo_dir must not be empty")
 	}
 
 	return nil

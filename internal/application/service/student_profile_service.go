@@ -181,9 +181,9 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 		return nil, "", nil
 	}
 
-	// 6. Resolve full URL and download
+	// 6. Resolve full URL and download to per-NPM dir
 	photoURL := s.cfg.App.LMSBaseURL + "/admin/" + src
-	savePath := filepath.Join(s.cfg.App.PhotoDir, req.NPM+".jpg")
+	savePath := filepath.Join(s.cfg.App.DownloadDir, req.NPM, "photo", req.NPM+".jpg")
 	_, _, err = sess.DownloadImage(photoURL, savePath)
 	if err != nil {
 		return nil, "", fmt.Errorf("download photo: %w", err)
@@ -195,7 +195,7 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 		return nil, "", fmt.Errorf("read downloaded photo: %w", err)
 	}
 
-	// 8. Save to cache (metadata)
+	// 8. Save metadata to cache
 	if err := s.photoCache.Set(req.NPM, photoData, filepath.Base(src)); err != nil {
 		slog.Warn("failed to cache photo metadata", "npm", req.NPM, "error", err)
 		// Non-fatal — still return photo

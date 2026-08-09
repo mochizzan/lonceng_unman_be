@@ -60,7 +60,7 @@ func (c *PhotoCache) Get(npm string) (string, error) {
 
 // Set saves the photo and metadata to cache.
 func (c *PhotoCache) Set(npm string, photoData []byte, originalFilename string) error {
-	if err := os.MkdirAll(c.baseDir, 0o755); err != nil {
+	if err := os.MkdirAll(c.photoDir(npm), 0o755); err != nil {
 		return fmt.Errorf("create photo dir: %w", err)
 	}
 
@@ -87,10 +87,14 @@ func (c *PhotoCache) Set(npm string, photoData []byte, originalFilename string) 
 	return nil
 }
 
+func (c *PhotoCache) photoDir(npm string) string {
+	return filepath.Join(c.baseDir, npm, "photo")
+}
+
 func (c *PhotoCache) photoPath(npm string) string {
-	return filepath.Join(c.baseDir, npm+".jpg")
+	return filepath.Join(c.photoDir(npm), npm+".jpg")
 }
 
 func (c *PhotoCache) metaPath(npm string) string {
-	return filepath.Join(c.baseDir, npm+".json")
+	return filepath.Join(c.photoDir(npm), npm+".json")
 }

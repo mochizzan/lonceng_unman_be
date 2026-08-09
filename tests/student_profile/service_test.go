@@ -161,7 +161,7 @@ func newTestService(
 	scraper port.StudentProfileScraper,
 	cache port.ExtractionCache,
 ) service.StudentProfileService {
-	photoCache := photocache.New("/tmp/test_photos", 15*time.Minute)
+	photoCache := photocache.New("/tmp/downloads", 15*time.Minute)
 	return service.NewStudentProfileService(newTestConfig(), sessions, scraper, cache, photoCache)
 }
 

@@ -58,7 +58,7 @@ func main() {
 
 	// Wire student profile scraper, service, and handler
 	studentProfileScraper := browser.NewStudentProfileScraper()
-	photoCache := photocache.New(cfg.App.PhotoDir, cfg.App.PhotoCacheTTL)
+	photoCache := photocache.New(cfg.App.DownloadDir, cfg.App.PhotoCacheTTL)
 	studentProfileService := service.NewStudentProfileService(cfg, sessionMgr, studentProfileScraper, cache, photoCache)
 	studentProfileHandler := handler.NewStudentProfileHandler(studentProfileService)
 
