@@ -26,7 +26,11 @@ const scrapeJSCode = `async function() {
         if (!el) return '';
         if (el.tagName === 'SELECT') {
             const selected = el.options[el.selectedIndex];
-            return selected ? (selected.text || el.value) : el.value || '';
+            if (!selected) return el.value || '';
+            // If the selected option has empty value, it's a placeholder — return empty
+            if (selected.value === '') return '';
+            // Return display text (not value) for real selections
+            return selected.text || selected.value || '';
         }
         return el.value || '';
     };
@@ -67,14 +71,14 @@ const scrapeJSCode = `async function() {
         nama_kantor: getVal('nama_kantor'),
         alamat_kantor: getVal('alamat_kantor'),
         nama_ayah: getVal('nama_ayah'),
-        tanggal_lahir_ayah: getVal('tanggal_lahir_ayah'),
+        // tanggal_lahir_ayah: removed — element does not exist in HTML form
         nik_ayah: getVal('nik_ayah'),
         no_hp_ayah: getVal('no_hp_ayah'),
         id_jenjang_pendidikan_ayah: getVal('id_jenjang_pendidikan_ayah'),
         id_pekerjaan_ayah: getVal('id_pekerjaan_ayah'),
         id_penghasilan_ayah: getVal('id_penghasilan_ayah'),
         id_kebutuhan_khusus_ayah: getVal('id_kebutuhan_khusus_ayah'),
-        nama_ibu: getVal('nama_ibu'),
+        nama_ibu: getVal('nama_ibu_kandung'),
         tanggal_lahir_ibu: getVal('tanggal_lahir_ibu'),
         nik_ibu: getVal('nik_ibu'),
         no_hp_ibu: getVal('no_hp_ibu'),
@@ -175,7 +179,6 @@ func (s *studentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL s
 		},
 		FatherData: entity.FatherData{
 			NamaAyah:              raw["nama_ayah"],
-			TanggalLahirAyah:      raw["tanggal_lahir_ayah"],
 			NIKAyah:               raw["nik_ayah"],
 			NoHpAyah:              raw["no_hp_ayah"],
 			JenjangPendidikanAyah: raw["id_jenjang_pendidikan_ayah"],
