@@ -144,11 +144,13 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 	time.Sleep(3 * time.Second)
 
 	// 5. Extract photo src via JS eval
-	jsCode := `(() => {
+	// go-rod wraps code in: function() { return (CODE).apply(this, arguments) }
+	// So we use an async function expression, NOT an IIFE.
+	jsCode := `async function() {
 		const img = document.querySelector('img[src*="uploads_foto"]');
 		if (!img) return '';
 		return img.getAttribute('src') || '';
-	})()`
+	}`
 
 	src, err := sess.Eval(jsCode)
 	if err != nil {
