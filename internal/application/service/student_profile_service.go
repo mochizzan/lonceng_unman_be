@@ -140,19 +140,37 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 		return nil, "", fmt.Errorf("navigate to dashboard: %w", err)
 	}
 
-	// 4. Wait for page load
-	time.Sleep(3 * time.Second)
+	// 4. Wait for page to fully render (photo may load dynamically)
+	time.Sleep(8 * time.Second)
 
-	// 5. Extract photo src via JS eval
-	// go-rod wraps code in: function() { return (CODE).apply(this, arguments) }
-	// So we use an async function expression, NOT an IIFE.
-	jsCode := `async function() {
-		const img = document.querySelector('img[src*="uploads_foto"]');
-		if (!img) return '';
-		return img.getAttribute('src') || '';
-	}`
+	// 5. Extract photo src via JS eval with retry
+	// The <img> is inside <div class="small-box bg-yellow"> wrapped by <a href="ktm_take_foto.php">
+	// We use a specific selector to avoid matching default/placeholder images.
+	var src string
+	for range 3 {
+		// go-rod wraps code in: function() { return (CODE).apply(this, arguments) }
+		// So we use an async function expression, NOT an IIFE.
+		jsCode := `async function() {
+			// Find the <a> that links to ktm_take_foto.php, then get its child <img>
+			const link = document.querySelector('a[href*="ktm_take_foto"]');
+			if (!link) return '';
+			const img = link.querySelector('img[src*="uploads_foto"]');
+			if (!img) return '';
+			return img.getAttribute('src') || '';
+		}`
 
-	src, err := sess.Eval(jsCode)
+		src, err = sess.Eval(jsCode)
+		if err != nil {
+			return nil, "", fmt.Errorf("extract photo src: %w", err)
+		}
+
+		if src != "" {
+			break
+		}
+
+		// Wait before retry
+		time.Sleep(3 * time.Second)
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("extract photo src: %w", err)
 	}
