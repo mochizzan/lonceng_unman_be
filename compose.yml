@@ -142,7 +142,7 @@ services:
     # Uses wget (available in slim image), not curl
     # start_period: 30s for cold start (Chromium initialization takes time)
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
