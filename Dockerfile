@@ -48,6 +48,10 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
+# Link this image to the GitHub repository (shows in Packages tab)
+LABEL org.opencontainers.image.source=https://github.com/mochizzan/lonceng_unman_be
+LABEL org.opencontainers.image.description="Lonceng Unman Backend — LMS document extraction API"
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install Chromium and ALL required libraries for go-rod browser automation.
