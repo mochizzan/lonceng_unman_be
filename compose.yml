@@ -23,7 +23,12 @@ services:
     #     VERSION: ${VERSION:-latest}
 
     container_name: lonceng-api
+    hostname: lonceng-api
     restart: unless-stopped
+
+    # --- Platform (explicit target architecture) ---
+    platform: linux/amd64
+
     ports:
       # Bind to 127.0.0.1 only — cloudflared on Windows host connects via localhost
       # This prevents the app from being directly accessible on the LAN
@@ -69,6 +74,12 @@ services:
       # Timezone (important for time-based operations)
       TZ: ${TZ:-Asia/Jakarta}
 
+    # --- DNS Configuration ---
+    # Use reliable public DNS for LMS domain resolution
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
     # --- Volumes (bind mount — relative to this compose.yml) ---
     # Files will be accessible directly in the project folder
     # Works on any OS (Windows, Linux, Mac) — path is always relative
@@ -76,6 +87,12 @@ services:
       - ./downloads:/data/downloads
       - ./extracted:/data/extracted
       - ./profiles:/data/profiles
+      # Tmpfs for /tmp — RAM-based, faster than disk, auto-cleaned on container stop
+      # Used by Chromium for cache, screenshots, and temp files
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 512M
 
     # --- Resource Limits ---
     # Chromium is memory-hungry; ensure enough headroom
@@ -93,18 +110,43 @@ services:
     # 1GB is safe for headless Chromium with multiple tabs.
     shm_size: "1gb"
 
+    # --- OOM Priority ---
+    # Higher value = more likely to be killed by OOM killer
+    # Chromium gets higher priority (more memory-hungry, less critical)
+    oom_score_adj: 100
+
+    # --- Kernel Parameters ---
+    # Network tuning for better connection handling
+    sysctls:
+      # Max listen backlog for incoming connections
+      net.core.somaxconn: 1024
+      # Max SYN backlog for half-open connections
+      net.ipv4.tcp_max_syn_backlog: 1024
+      # Enable TCP Fast Open (client + server)
+      net.ipv4.tcp_fastopen: 3
+
     # --- Graceful Shutdown ---
     # Allow 30s for in-flight requests and Chrome cleanup before SIGKILL
     stop_grace_period: 30s
 
+    # --- Stop Signal ---
+    # Explicit SIGTERM for graceful shutdown (default, but explicit is better)
+    stop_signal: SIGTERM
+
+    # --- Init Process ---
+    # Docker's built-in init handles PID 1, signal forwarding, zombie reaping
+    # Alternative to dumb-init in Dockerfile — more integrated with Docker
+    init: true
+
     # --- Health Check ---
     # Uses wget (available in slim image), not curl
+    # start_period: 30s for cold start (Chromium initialization takes time)
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 30s
 
     # --- Logging ---
     logging:
