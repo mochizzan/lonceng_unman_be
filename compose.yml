@@ -9,13 +9,19 @@ services:
   # Main Application Service
   # ---------------------------------------------------------------------------
   lonceng-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        APP_NAME: lonceng_unman_be
-        BUILD_TIME: ${BUILD_TIME:-}
-        VERSION: ${VERSION:-latest}
+    # --- Pull from GitHub Container Registry (production) ---
+    image: ghcr.io/mochizzan/lonceng_unman_be:latest
+
+    # --- Build locally (development) ---
+    # Uncomment below and comment out "image:" above to build from source
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     APP_NAME: lonceng_unman_be
+    #     BUILD_TIME: ${BUILD_TIME:-}
+    #     VERSION: ${VERSION:-latest}
+
     container_name: lonceng-api
     restart: unless-stopped
     ports:
