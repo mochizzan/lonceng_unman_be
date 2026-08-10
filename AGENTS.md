@@ -6,18 +6,18 @@
 
 ## Project Overview
 
-| Field | Value |
+|Field|Value|
 |---|---|
-| **Project Year** | 2026 |
-| **Project Type** | REST API Backend |
-| **Language** | Go 1.26.4 |
-| **Framework** | Fiber v3.4.0 |
-| **PDF Library** | razvandimescu/gopdf v0.9.5 |
-| **Browser Automation** | go-rod v0.116.2 |
-| **Architecture** | Clean Architecture (4-layer) |
-| **Development OS** | Windows 10 Pro (NOT Unix/Linux/Mac) |
-| **Shell / Bash** | Git Bash (MSYS2) — NOT WSL, NOT PowerShell, NOT cmd |
-| **Module Path** | `lonceng_unman_be` |
+|**Project Year**|2026|
+|**Project Type**|REST API Backend|
+|**Language**|Go 1.26.4|
+|**Framework**|Fiber v3.4.0|
+|**PDF Library**|razvandimescu/gopdf v0.9.5|
+|**Browser Automation**|go-rod v0.116.2|
+|**Architecture**|Clean Architecture (4-layer)|
+|**Development OS**|Windows 10 Pro (NOT Unix/Linux/Mac)|
+|**Shell / Bash**|Git Bash (MSYS2) — NOT WSL, NOT PowerShell, NOT cmd|
+|**Module Path**|`lonceng_unman_be`|
 
 **Lonceng Unman Backend** is a RESTful API for automated LMS (Learning Management System) document extraction. It logs into an academic LMS via headless Chrome, downloads KRS (course registration) and KHS (grade report) PDFs, parses them into structured JSON using position-based PDF extraction, and caches results. No database — all data is in-memory or file-based.
 
@@ -37,42 +37,48 @@ internal/
 │   │   ├── health.go                 ← HealthStatus
 │   │   ├── lms.go                    ← LoginRequest, LoginResult
 │   │   ├── document.go               ← KRS/KHS download requests/results, KHSFilename
-│   │   └── extraction.go             ← KRSExtraction, KHSExtraction, ExtractionResult
+│   │   ├── extraction.go             ← KRSExtraction, KHSExtraction, ExtractionResult
+│   │   └── student_profile.go        ← StudentProfile, StudentProfileRequest
 │   └── port/                         ← Interfaces for outer layers
 │       ├── browser.go                ← BrowserSession interface
 │       ├── session.go                ← SessionManager interface
 │       ├── extraction.go             ← PDFParser, ExtractionCache interfaces
-│       └── lms_config.go             ← LMSConfig interface (CSS selectors, URL paths)
+│       ├── lms_config.go             ← LMSConfig interface (CSS selectors, URL paths)
+│       └── student_profile_scraper.go← StudentProfileScraper interface
 ├── application/service/              ← Layer 2: Business logic implementations
 │   ├── health_service.go             ← HealthChecker interface + impl
 │   ├── lms_service.go                ← LMSLogin + LMSDocumentService interfaces + impl
-│   └── extraction_service.go         ← ExtractionService interface + impl
+│   ├── extraction_service.go         ← ExtractionService interface + impl
+│   └── student_profile_service.go    ← StudentProfileService (scrape, get, get photo)
 ├── interfaces/http/                  ← Layer 3: HTTP transport
 │   ├── handler/                      ← Request handlers (depend on service interfaces)
 │   │   ├── health_handler.go         ← HealthHandler (→ service.HealthChecker)
 │   │   ├── lms_handler.go            ← LMSHandler (→ service.LMSLogin)
 │   │   ├── document_handler.go       ← DocumentHandler (→ service.LMSDocumentService)
-│   │   └── extraction_handler.go     ← ExtractionHandler (→ service.ExtractionService)
-│   ├── router/router.go              ← 9 routes under /api/v1
-│   └── response/response.go          ← Uniform JSON response envelope
+│   │   ├── extraction_handler.go     ← ExtractionHandler (→ service.ExtractionService)
+│   │   └── student_profile_handler.go← StudentProfileHandler (→ service.StudentProfileService)
+│   ├── router/router.go              ← 13 routes under /api/v1
+│   └── response/response.go          ← Uniform JSON response envelope (Success/Error)
 └── infrastructure/                   ← Layer 4: External implementations
-    ├── middleware/middleware.go       ← recover → requestid → logger → cors
+    ├── middleware/middleware.go       ← recover → requestid → logger → gzip → cors
     ├── logger/logger.go              ← slog-based structured logging
-    ├── fibererror/handler.go         ← Global error handler
+    ├── fibererror/handler.go         ← Global error handler (AppError cascade)
     ├── browser/
     │   ├── browser.go                ← go-rod Browser wrapper
     │   ├── selectors.go              ← CSS selectors + URL paths for LMS
-    │   └── download.go               ← PDF download via JS fetch()
+    │   ├── download.go               ← PDF/image download via JS fetch()
+    │   └── scraper.go                ← StudentProfileScraper (browser automation for profile)
     ├── session/
     │   ├── manager.go                ← In-memory session cache with TTL + Chrome profile persistence
     │   └── session.go                ← rodSession: thread-safe BrowserSession impl
-    └── extractor/
-        ├── pdf_reader.go             ← PDF text extraction with positional data
-        ├── parser_common.go          ← Shared constants + helpers (KRS & KHS)
-        ├── krs_parser.go             ← Structured KRS extraction from PDF (position-based)
-        ├── khs_parser.go             ← Structured KHS extraction from PDF (position-based)
-        └── cache.go                  ← File-based extraction cache + MarshalJSON
-tests/                                ← External test packages (mirrors internal/)
+    ├── extractor/
+    │   ├── pdf_reader.go             ← PDF text extraction with positional data
+    │   ├── parser_common.go          ← Shared constants + helpers (KRS & KHS), NormalizeLabel
+    │   ├── krs_parser.go             ← Structured KRS extraction from PDF (position-based)
+    │   ├── khs_parser.go             ← Structured KHS extraction from PDF (position-based)
+    │   └── cache.go                  ← File-based extraction cache + MarshalJSON
+    └── photocache/
+        └── cache.go                  ← Student photo file cache with TTL + JSON metadata
 ```
 
 ### Dependency Rule
@@ -98,6 +104,7 @@ Client Request
   → recover middleware (panic protection)
   → requestid middleware (inject trace_id)
   → logger middleware (request logging)
+  → gzip middleware (compression)
   → cors middleware (CORS headers)
   → router dispatch (POST /api/v1/<path>, except GET /health)
   → handler method (parse JSON body via c.Bind().JSON)
@@ -120,28 +127,29 @@ handler returns apperror.* → fibererror ErrorHandler
 
 ## Key Directories
 
-| Directory | Purpose |
+|Directory|Purpose|
 |---|---|
-| `cmd/server/` | Application entry point, dependency wiring |
-| `internal/config/` | Environment-based config loading and validation |
-| `internal/apperror/` | Shared error types (cross-cutting concern) |
-| `internal/domain/entity/` | Pure data models (zero dependencies) |
-| `internal/domain/port/` | Interface contracts for outer layers |
-| `internal/application/service/` | Business logic implementations |
-| `internal/interfaces/http/handler/` | HTTP request handlers |
-| `internal/interfaces/http/router/` | Route definitions |
-| `internal/interfaces/http/response/` | JSON response envelope |
-| `internal/infrastructure/middleware/` | Fiber middleware stack |
-| `internal/infrastructure/logger/` | Structured logging (slog) |
-| `internal/infrastructure/fibererror/` | Global error handler |
-| `internal/infrastructure/browser/` | go-rod browser automation |
-| `internal/infrastructure/session/` | Session management + Chrome profiles |
-| `internal/infrastructure/extractor/` | PDF extraction + caching |
-| `tests/` | External test packages (mirrors internal/) |
-| `downloads/` | Runtime PDF download directory (gitignored) |
-| `extracted/` | Runtime extraction cache directory (gitignored) |
-| `profiles/` | Persistent Chrome profile directories (gitignored) |
-| `docs/` | Design documents and implementation plans |
+|`cmd/server/`|Application entry point, dependency wiring|
+|`internal/config/`|Environment-based config loading and validation|
+|`internal/apperror/`|Shared error types (cross-cutting concern)|
+|`internal/domain/entity/`|Pure data models (zero dependencies)|
+|`internal/domain/port/`|Interface contracts for outer layers|
+|`internal/application/service/`|Business logic implementations|
+|`internal/interfaces/http/handler/`|HTTP request handlers|
+|`internal/interfaces/http/router/`|Route definitions|
+|`internal/interfaces/http/response/`|JSON response envelope|
+|`internal/infrastructure/middleware/`|Fiber middleware stack|
+|`internal/infrastructure/logger/`|Structured logging (slog)|
+|`internal/infrastructure/fibererror/`|Global error handler|
+|`internal/infrastructure/browser/`|go-rod browser automation|
+|`internal/infrastructure/session/`|Session management + Chrome profiles|
+|`internal/infrastructure/extractor/`|PDF extraction + caching|
+|`internal/infrastructure/photocache/`|Student photo file cache|
+|`tests/`|External test packages (mirrors internal/)|
+|`downloads/`|Runtime PDF download directory (gitignored)|
+|`extracted/`|Runtime extraction cache directory (gitignored)|
+|`profiles/`|Persistent Chrome profile directories (gitignored)|
+|`docs/`|Design documents and implementation plans|
 
 ---
 
@@ -172,6 +180,7 @@ go test ./tests/apperror/ -v
 go test ./tests/extractor/ -v
 go test ./tests/service/ -v
 go test ./tests/fibererror/ -v
+go test ./tests/student_profile/ -v
 
 # Run with verbose output
 go test ./tests/... -v
@@ -190,26 +199,18 @@ go vet ./...
 go mod tidy
 ```
 
-### Code Exploration
-
-```bash
-# Using codegraph (if .codegraph/ exists)
-codegraph explore "DownloadPDF"
-codegraph explore "BrowserSession"
-```
-
 ---
 
 ## Code Conventions & Common Patterns
 
 ### File Naming
 
-| Convention | Example |
+|Convention|Example|
 |---|---|
-| Go source files | `snake_case.go` (`health_service.go`, `apperror.go`) |
-| Test files | `tests/<package>/<name>_test.go` (external packages) |
-| Package names | Single lowercase word (`config`, `entity`, `service`, `handler`, `response`) |
-| Parser files | `parser_common.go` for shared constants/helpers |
+|Go source files|`snake_case.go` (`health_service.go`, `apperror.go`)|
+|Test files|`tests/<package>/<name>_test.go` (external packages)|
+|Package names|Single lowercase word (`config`, `entity`, `service`, `handler`, `response`)|
+|Parser files|`parser_common.go` for shared constants/helpers|
 
 ### Error Handling
 
@@ -273,6 +274,9 @@ cfg.App.Port       // from APP_PORT (default: "3000")
 cfg.App.Host       // from APP_HOST (default: "0.0.0.0")
 cfg.App.DownloadDir  // from DOWNLOAD_DIR (default: "./downloads")
 cfg.App.ExtractDir   // from EXTRACT_DIR (default: "./extracted")
+cfg.App.MaxSessions  // from MAX_SESSIONS (default: 15)
+cfg.App.SessionTTL   // from SESSION_TTL (default: 15m)
+cfg.App.PhotoCacheTTL// from PHOTO_CACHE_TTL (default: 15m)
 ```
 
 ### Middleware Order
@@ -280,12 +284,13 @@ cfg.App.ExtractDir   // from EXTRACT_DIR (default: "./extracted")
 **Strict order** — DO NOT change without understanding implications:
 
 ```
-recover → requestid → logger → cors
+recover → requestid → logger → gzip → cors
 ```
 
 - `recover` MUST be first (catches panics from all subsequent middleware)
 - `requestid` generates trace_id used by error handler and logger
 - `logger` needs the requestid for correlation
+- `gzip` applies compression before CORS headers
 - `cors` is last — headers applied after all processing
 
 ### Dependency Injection
@@ -294,7 +299,7 @@ Manual constructor injection in `cmd/server/main.go`. No DI framework.
 
 ```go
 // Composition root pattern
-healthService := service.NewHealthService(cfg)
+healthService := service.NewHealthService(cfg.App)
 healthHandler := handler.NewHealthHandler(healthService)
 
 // Interface-based — handlers depend on interfaces, not concrete types
@@ -329,31 +334,32 @@ var _ service.HealthChecker = service.NewHealthService(cfg)
 
 ### Entry Points
 
-| File | Purpose |
+|File|Purpose|
 |---|---|
-| `cmd/server/main.go` | Application entry point, DI wiring, Fiber app setup |
-| `internal/interfaces/http/router/router.go` | All route definitions (9 routes) |
-| `internal/config/config.go` | Config struct with env loading, validation, typed defaults |
+|`cmd/server/main.go`|Application entry point, DI wiring, Fiber app setup|
+|`internal/interfaces/http/router/router.go`|All route definitions (13 routes)|
+|`internal/config/config.go`|Config struct with env loading, validation, typed defaults|
 
 ### Configuration
 
-| File | Purpose |
+|File|Purpose|
 |---|---|
-| `.env` | Active environment variables (gitignored) |
-| `.env.example` | Template env vars with comments (tracked) |
-| `internal/config/config.go` | Config struct, validation, env parsing |
-| `go.mod` | Go module definition and dependencies |
-| `run.cmd` | Windows build-and-run script |
+|`.env`|Active environment variables (gitignored)|
+|`.env.example`|Template env vars with comments (tracked)|
+|`internal/config/config.go`|Config struct, validation, env parsing|
+|`go.mod`|Go module definition and dependencies|
+|`run.cmd`|Windows build-and-run script|
 
 ### Documentation
 
-| File | Purpose |
+|File|Purpose|
 |---|---|
-| `README.md` | Project README (Indonesian) |
-| `API.md` | Comprehensive API documentation (English, 2009 lines) |
-| `LICENSE` | The Unlicense (public domain) |
-| `docs/SESSION_CACHE_RECOMMENDATION.md` | Chrome profile persistence design |
-| `docs/superpowers/plans/` | Implementation plans |
+|`README.md`|Project README (Indonesian)|
+|`docs/`|API documentation per endpoint (12 files)|
+|`docs/ENVIRONMENT.md`|Environment variable reference|
+|`docs/ERROR_HANDLING.md`|Error handling documentation|
+|`docs/FOLDER_STRUCTURE.md`|Directory structure guide|
+|`SESSION_CACHE_RECOMMENDATION.md`|Chrome profile persistence design|
 
 ---
 
@@ -368,12 +374,12 @@ var _ service.HealthChecker = service.NewHealthService(cfg)
 
 ### Dependencies
 
-| Package | Version | Purpose |
+|Package|Version|Purpose|
 |---|---|---|
-| `gofiber/fiber/v3` | v3.4.0 | HTTP framework |
-| `go-rod/rod` | v0.116.2 | Headless Chrome automation |
-| `razvandimescu/gopdf` | v0.9.5 | PDF generation (used for extraction) |
-| `joho/godotenv` | v1.5.1 | .env file loading |
+|`gofiber/fiber/v3`|v3.4.0|HTTP framework|
+|`go-rod/rod`|v0.116.2|Headless Chrome automation|
+|`razvandimescu/gopdf`|v0.9.5|PDF generation (used for extraction)|
+|`joho/godotenv`|v1.5.1|.env file loading|
 
 ### Package Manager
 
@@ -413,7 +419,10 @@ PROFILE_BASE_DIR=./profiles
 
 # Session
 SESSION_TTL=15m
-MAX_SESSIONS=10
+MAX_SESSIONS=15
+
+# Photo Cache
+PHOTO_CACHE_TTL=15m
 
 # Limits
 MAX_BODY_SIZE=1MB
@@ -449,8 +458,10 @@ tests/
 │   ├── parse_header_test.go       ← NormalizeLabel with table-driven subtests
 │   ├── khs_parser_test.go         ← KHS parsing with conditional integration
 │   └── krs_parser_test.go         ← KRS parsing with conditional integration
-internal/
-└── infrastructure/extractor/khs_dedup_test.go  ← In-tree dedup regression tests
+├── student_profile/
+│   ├── handler_test.go            ← StudentProfile HTTP handler tests (scrape, get, photo)
+│   ├── service_test.go            ← StudentProfile service tests with mocks
+│   └── entity_test.go             ← Student profile entity tests
 ```
 
 ### Test Naming Convention
@@ -462,6 +473,7 @@ func TestFunctionName_Behavior(t *testing.T) {
     func TestParseKHS_FileNotFound(t *testing.T) { ... }
     func TestNotFound(t *testing.T) { ... }
     func TestNew_ValidConfig(t *testing.T) { ... }
+    func TestScrape_EmptyNPM(t *testing.T) { ... }
 }
 ```
 
@@ -474,6 +486,7 @@ go test ./...
 # Specific package with verbose output
 go test ./tests/config/ -v
 go test ./tests/extractor/ -v
+go test ./tests/student_profile/ -v
 
 # Specific test function
 go test ./tests/config/ -run TestLoadConfig -v
@@ -537,6 +550,17 @@ func TestHealthHandler(t *testing.T) {
 }
 ```
 
+```go
+// Mock pattern (manual, no gomock)
+type mockCache struct {
+    getFn func(key string) ([]byte, error)
+    setFn func(key string, data []byte) error
+}
+
+func (m *mockCache) Get(key string) ([]byte, error) { return m.getFn(key) }
+func (m *mockCache) Set(key string, data []byte) error { return m.setFn(key, data) }
+```
+
 ### Coverage Expectations
 
 - **Unit tests** for all service methods and handlers
@@ -585,7 +609,7 @@ fix/<bug-description>  # e.g., fix/khs-dedup-error
 3. **Response envelope** — Always use `response.Success()` / `response.Error()`, NEVER raw JSON
 4. **Logging** — Use `log/slog` only, no external logging libraries
 5. **Config** — All values from env vars, no hardcoding
-6. **Middleware order** — Strict: recover → requestid → logger → cors
+6. **Middleware order** — Strict: recover → requestid → logger → gzip → cors
 7. **Windows paths** — Use forward slashes in Go code, quote paths with spaces
 8. **go-rod** — Use non-Must methods (return errors) in production code
 
@@ -593,28 +617,100 @@ fix/<bug-description>  # e.g., fix/khs-dedup-error
 
 ## API Endpoints
 
-| Method | Path | Handler | Description |
+|Method|Path|Handler|Description|
 |---|---|---|---|
-| `GET` | `/api/v1/health` | HealthHandler.Check | Health check |
-| `POST` | `/api/v1/lms/login` | LMSHandler.Login | LMS login |
-| `POST` | `/api/v1/lms/krs/download` | DocumentHandler.DownloadKRS | Download KRS PDF |
-| `POST` | `/api/v1/lms/khs/semesters` | DocumentHandler.GetKHSSemesters | Get KHS semesters |
-| `POST` | `/api/v1/lms/khs/download` | DocumentHandler.DownloadKHS | Download KHS PDF |
-| `POST` | `/api/v1/extraction/krs` | ExtractionHandler.ExtractKRS | Extract KRS from PDF |
-| `POST` | `/api/v1/extraction/khs` | ExtractionHandler.ExtractKHS | Extract KHS from PDF |
-| `POST` | `/api/v1/data/krs` | ExtractionHandler.GetKRS | Get cached KRS data |
-| `POST` | `/api/v1/data/khs` | ExtractionHandler.GetKHS | Get cached KHS data |
+|`GET`|`/api/v1/health`|HealthHandler.Check|Health check|
+|`POST`|`/api/v1/lms/login`|LMSHandler.Login|LMS login|
+|`POST`|`/api/v1/lms/krs`|DocumentHandler.DownloadKRS|Download KRS PDF|
+|`POST`|`/api/v1/lms/khs/semesters`|DocumentHandler.GetKHSSemesters|Get KHS semesters|
+|`POST`|`/api/v1/lms/khs`|DocumentHandler.DownloadKHS|Download KHS PDF|
+|`POST`|`/api/v1/lms/krs/extract`|ExtractionHandler.ExtractKRS|Extract KRS from PDF|
+|`POST`|`/api/v1/lms/khs/extract`|ExtractionHandler.ExtractKHS|Extract KHS from PDF|
+|`POST`|`/api/v1/lms/krs/data`|ExtractionHandler.GetKRS|Get cached KRS data|
+|`POST`|`/api/v1/lms/khs/data`|ExtractionHandler.GetKHS|Get cached KHS data|
+|`POST`|`/api/v1/lms/student-profile`|StudentProfileHandler.Scrape|Scrape student profile|
+|`POST`|`/api/v1/lms/student-profile/data`|StudentProfileHandler.Get|Get cached profile data|
+|`POST`|`/api/v1/lms/student-profile/photo`|StudentProfileHandler.GetPhoto|Get student photo|
 
 ---
 
 ## Session Management
 
 - **In-memory cache** with configurable TTL (default: 15 minutes)
-- **Maximum concurrent sessions** configurable (default: 10)
+- **Maximum concurrent sessions** configurable (default: 15)
 - **Chrome profile persistence** — sessions survive server restarts via `PROFILE_BASE_DIR`
 - **DNS pre-flight** — validates LMS reachability before browser connection
 - **Background cleanup** — expired sessions removed automatically
 - **Per-NPM locking** — prevents concurrent operations on same student
+- **Photo cache** — student photos cached with configurable TTL + JSON metadata
+
+---
+
+## Key Interfaces
+
+### BrowserSession (`internal/domain/port/browser.go`)
+
+```go
+type BrowserSession interface {
+    Navigate(url string) error
+    Eval(js string) (string, error)
+    ElementAttribute(selector, attr string) (string, error)
+    ElementExists(selector string) (bool, error)
+    ElementHref(selector string) (string, error)
+    DownloadPDF(url, savePath string) (string, int, error)
+    DownloadImage(url, savePath string) (string, int, error)
+    Close() error
+}
+```
+
+### SessionManager (`internal/domain/port/session.go`)
+
+```go
+type SessionManager interface {
+    GetOrCreate(npm, password string) (BrowserSession, error)
+    Close(npm string) error
+    CloseAll()
+}
+```
+
+### PDFParser (`internal/domain/port/extraction.go`)
+
+```go
+type PDFParser interface {
+    ParseKRS(path string) (*entity.KRSExtraction, error)
+    ParseKHS(path string) (*entity.KHSExtraction, error)
+    MarshalToJSON(data any) ([]byte, error)
+}
+```
+
+### ExtractionCache (`internal/domain/port/extraction.go`)
+
+```go
+type ExtractionCache interface {
+    Get(key string) ([]byte, error)
+    Set(key string, data []byte) error
+    Exists(key string) (bool, error)
+    Invalidate(key string) error
+}
+```
+
+---
+
+## PDF Extraction Pipeline
+
+```
+PDF file
+  → ReadPDFWithPosition()     ← Extract text spans with X,Y positions from PDF
+  → RowsToLines()             ← Group PDFRows into logical lines
+  → FindColumnPositions()     ← Detect column boundaries from header alignment
+  → SmartWordSplit()          ← Split merged words at column boundaries
+  → parseKRSMataKuliah()     ← Extract KRS course data (code, name, SKS, schedule)
+  → parseKHSMataKuliah()     ← Extract KHS grade data (code, name, grade, SKS, etc.)
+  → Deduplication             ← Remove duplicate entries (KHS-specific)
+  → JSON output               ← Marshal to structured JSON
+```
+
+**Position-based extraction** — uses PDF text span coordinates (X,Y) rather than text pattern matching. Y-axis is flipped (PDF origin at bottom, screen origin at top). Words are grouped by Y position into rows, then sorted by X position within each row.
 
 ---
 

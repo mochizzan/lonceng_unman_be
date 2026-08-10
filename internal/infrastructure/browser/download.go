@@ -27,7 +27,7 @@ func downloadBytes(page *rod.Page, url string, expectedContentType string) ([]by
 			}`, expectedContentType, expectedContentType)
 	}
 
-	jsCode := fmt.Sprintf(`async function() {
+	jsCode := fmt.Sprintf(`async () => {
 		const response = await fetch("%s", { credentials: "include" });
 		if (!response.ok) {
 			throw new Error("HTTP " + response.status + " " + response.statusText);

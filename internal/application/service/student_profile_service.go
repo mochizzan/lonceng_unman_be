@@ -150,7 +150,7 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 	for range 3 {
 		// go-rod wraps code in: function() { return (CODE).apply(this, arguments) }
 		// So we use an async function expression, NOT an IIFE.
-		jsCode := `async function() {
+		jsCode := `async () => {
 			// Find the <a> that links to ktm_take_foto.php, then get its child <img>
 			const link = document.querySelector('a[href*="ktm_take_foto"]');
 			if (!link) return '';

@@ -1,0 +1,80 @@
+# =============================================================================
+# Docker Build Context Exclusions
+# Keep build context small — speed up builds, avoid leaking secrets/artifacts
+# =============================================================================
+
+# --- Version Control ---
+.git/
+.gitignore
+
+# --- Build Artifacts ---
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# --- Runtime Data (NEVER bake into image) ---
+downloads/
+extracted/
+profiles/
+logs/
+
+# --- Environment Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- IDE & Editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- OS Artifacts ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# --- Documentation (not needed in image) ---
+docs/
+*.md
+LICENSE
+AGENTS.md
+
+# --- Agent Tools (not needed in image) ---
+.codegraph/
+.omp/
+.superpowers/
+
+# --- Test Fixtures ---
+tests/
+
+# --- Node (if frontend tooling added) ---
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# --- Docker (avoid recursive context) ---
+Dockerfile
+compose.yml
+docker-compose.override.yml
+
+# --- Go Build Cache (host-side) ---
+_dist/
+build/
+dist/
+*.tar.gz
+*.zip
+
+# --- Misc ---
+tmp/
+temp/
+.cache/
+*.tmp
+*.bak

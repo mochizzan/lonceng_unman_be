@@ -20,7 +20,7 @@ func NewStudentProfileScraper() port.StudentProfileScraper {
 // scrapeJSCode is the bulk JavaScript that reads all form fields in one eval call.
 // go-rod's Eval wraps the code in: function() { return (CODE).apply(this, arguments) }
 // So we pass an async function expression directly — NOT an IIFE.
-const scrapeJSCode = `async function() {
+const scrapeJSCode = `async () => {
     const getVal = (id) => {
         const el = document.getElementById(id);
         if (!el) return '';

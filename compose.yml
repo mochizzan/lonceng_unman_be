@@ -1,0 +1,140 @@
+# =============================================================================
+# Lonceng Unman Backend — Docker Compose (Production)
+# Deployment: Docker on WSL2 (Windows host)
+# Tunneling: cloudflared runs on Windows host, connects to localhost:3000
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Main Application Service
+  # ---------------------------------------------------------------------------
+  lonceng-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: lonceng_unman_be
+        BUILD_TIME: ${BUILD_TIME:-}
+        VERSION: ${VERSION:-latest}
+    container_name: lonceng-api
+    restart: unless-stopped
+    ports:
+      # Bind to 127.0.0.1 only — cloudflared on Windows host connects via localhost
+      # This prevents the app from being directly accessible on the LAN
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+
+    # --- Environment Variables ---
+    environment:
+      # Server
+      APP_NAME: lonceng_unman_be
+      APP_ENV: ${APP_ENV:-production}
+      APP_PORT: "3000"
+      APP_HOST: "0.0.0.0"
+
+      # CORS — restrict in production to only your domain
+      # Example: "https://yourdomain.com,https://www.yourdomain.com"
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
+      CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS:-GET,POST,OPTIONS}
+      CORS_ALLOW_HEADERS: ${CORS_ALLOW_HEADERS:-Content-Type}
+
+      # LMS Browser Automation
+      LMS_BASE_URL: ${LMS_BASE_URL:-https://elearning.universitasmandiri.ac.id}
+      LMS_DASHBOARD_URL: ${LMS_DASHBOARD_URL:-https://elearning.universitasmandiri.ac.id/admin/}
+      BROWSER_HEADLESS: "true"
+      BROWSER_TIMEOUT: ${BROWSER_TIMEOUT:-60s}
+      DNS_TIMEOUT: ${DNS_TIMEOUT:-5s}
+
+      # Persistent Paths (inside container)
+      DOWNLOAD_DIR: /data/downloads
+      EXTRACT_DIR: /data/extracted
+      PROFILE_BASE_DIR: /data/profiles
+
+      # Session Management
+      SESSION_TTL: ${SESSION_TTL:-15m}
+      MAX_SESSIONS: ${MAX_SESSIONS:-15}
+
+      # Photo Cache
+      PHOTO_CACHE_TTL: ${PHOTO_CACHE_TTL:-15m}
+
+      # Limits
+      MAX_BODY_SIZE: ${MAX_BODY_SIZE:-1MB}
+      MAX_PDF_SIZE: ${MAX_PDF_SIZE:-50MB}
+
+      # Timezone (important for time-based operations)
+      TZ: ${TZ:-Asia/Jakarta}
+
+    # --- Volumes (persistent data) ---
+    volumes:
+      - lonceng-downloads:/data/downloads
+      - lonceng-extracted:/data/extracted
+      - lonceng-profiles:/data/profiles
+
+    # --- Resource Limits ---
+    # Chromium is memory-hungry; ensure enough headroom
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+
+    # --- Shared Memory for Chromium ---
+    # Chromium uses /dev/shm for IPC. Default 64MB is too small and causes crashes.
+    # 1GB is safe for headless Chromium with multiple tabs.
+    shm_size: "1gb"
+
+    # --- Graceful Shutdown ---
+    # Allow 30s for in-flight requests and Chrome cleanup before SIGKILL
+    stop_grace_period: 30s
+
+    # --- Health Check ---
+    # Uses wget (available in slim image), not curl
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    # --- Logging ---
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # --- Network ---
+    networks:
+      - lonceng-network
+
+    # --- Security Hardening ---
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_ADMIN  # Required by Chromium sandbox in container
+    security_opt:
+      - no-new-privileges:true
+
+# ---------------------------------------------------------------------------
+# Named Volumes (persistent across container restarts)
+# ---------------------------------------------------------------------------
+volumes:
+  lonceng-downloads:
+    driver: local
+    name: lonceng-downloads
+  lonceng-extracted:
+    driver: local
+    name: lonceng-extracted
+  lonceng-profiles:
+    driver: local
+    name: lonceng-profiles
+
+# ---------------------------------------------------------------------------
+# Network Configuration
+# ---------------------------------------------------------------------------
+networks:
+  lonceng-network:
+    driver: bridge
+    name: lonceng-network
