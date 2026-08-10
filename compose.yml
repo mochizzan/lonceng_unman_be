@@ -69,11 +69,13 @@ services:
       # Timezone (important for time-based operations)
       TZ: ${TZ:-Asia/Jakarta}
 
-    # --- Volumes (persistent data) ---
+    # --- Volumes (bind mount — relative to this compose.yml) ---
+    # Files will be accessible directly in the project folder
+    # Works on any OS (Windows, Linux, Mac) — path is always relative
     volumes:
-      - lonceng-downloads:/data/downloads
-      - lonceng-extracted:/data/extracted
-      - lonceng-profiles:/data/profiles
+      - ./downloads:/data/downloads
+      - ./extracted:/data/extracted
+      - ./profiles:/data/profiles
 
     # --- Resource Limits ---
     # Chromium is memory-hungry; ensure enough headroom
@@ -122,20 +124,6 @@ services:
       - SYS_ADMIN  # Required by Chromium sandbox in container
     security_opt:
       - no-new-privileges:true
-
-# ---------------------------------------------------------------------------
-# Named Volumes (persistent across container restarts)
-# ---------------------------------------------------------------------------
-volumes:
-  lonceng-downloads:
-    driver: local
-    name: lonceng-downloads
-  lonceng-extracted:
-    driver: local
-    name: lonceng-extracted
-  lonceng-profiles:
-    driver: local
-    name: lonceng-profiles
 
 # ---------------------------------------------------------------------------
 # Network Configuration
