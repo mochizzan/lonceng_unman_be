@@ -50,10 +50,10 @@ RUN apk add --no-cache \
     wget \
     dumb-init
 
-# Create non-root user
+# Create non-root user with own tmp directory
 RUN addgroup -S appuser && adduser -S appuser -G appuser \
-    && mkdir -p /tmp/chromium-cache \
-    && chown appuser:appuser /tmp/chromium-cache
+    && mkdir -p /data/tmp /tmp/chromium-cache \
+    && chown -R appuser:appuser /data/tmp /tmp/chromium-cache
 
 # Create symlinks for go-rod browser detection
 # go-rod looks for "chrome" or "chromium" in PATH, but Alpine installs as "chromium-browser"
@@ -86,6 +86,7 @@ ENV APP_ENV=production \
     EXTRACT_DIR=/data/extracted \
     PROFILE_BASE_DIR=/data/profiles \
     ROD_BROWSER=/usr/bin/chromium-browser \
+    TMPDIR=/data/tmp \
     ROD_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --disable-extensions --no-first-run"
 
 ENTRYPOINT ["dumb-init", "--"]
