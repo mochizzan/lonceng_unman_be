@@ -10,6 +10,15 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
+// browserBinPath returns the browser binary path from ROD_BROWSER env var,
+// or empty string to let go-rod auto-detect/download.
+func browserBinPath() string {
+	if v := os.Getenv("ROD_BROWSER"); v != "" {
+		return v
+	}
+	return ""
+}
+
 // Browser wraps go-rod's browser and launcher for lifecycle management.
 type Browser struct {
 	rod             *rod.Browser
@@ -28,6 +37,10 @@ func (b *Browser) Connect(headless bool) error {
 		Headless(headless).
 		Set("no-sandbox").
 		Set("disable-gpu")
+
+	if bin := browserBinPath(); bin != "" {
+		l = l.Bin(bin)
+	}
 
 	url, err := l.Launch()
 	if err != nil {
@@ -61,6 +74,10 @@ func (b *Browser) ConnectWithProfile(headless bool, profileDir string) error {
 		Set("disable-http-cache").
 		Set("disk-cache-size=0").
 		Set("media-cache-size=0")
+
+	if bin := browserBinPath(); bin != "" {
+		l = l.Bin(bin)
+	}
 
 	url, err := l.Launch()
 	if err != nil {

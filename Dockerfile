@@ -55,6 +55,11 @@ RUN addgroup -S appuser && adduser -S appuser -G appuser \
     && mkdir -p /tmp/chromium-cache \
     && chown appuser:appuser /tmp/chromium-cache
 
+# Create symlinks for go-rod browser detection
+# go-rod looks for "chrome" or "chromium" in PATH, but Alpine installs as "chromium-browser"
+RUN ln -sf /usr/bin/chromium-browser /usr/bin/chromium \
+    && ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome
+
 # Create application directories
 RUN mkdir -p /app /data/downloads /data/extracted /data/profiles \
     && chown -R appuser:appuser /app /data
@@ -80,6 +85,7 @@ ENV APP_ENV=production \
     DOWNLOAD_DIR=/data/downloads \
     EXTRACT_DIR=/data/extracted \
     PROFILE_BASE_DIR=/data/profiles \
+    ROD_BROWSER=/usr/bin/chromium-browser \
     ROD_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --disable-extensions --no-first-run"
 
 ENTRYPOINT ["dumb-init", "--"]
