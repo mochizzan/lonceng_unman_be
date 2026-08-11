@@ -195,7 +195,32 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 		return nil, "", fmt.Errorf("read downloaded photo: %w", err)
 	}
 
-	// 8. Save metadata to cache
+	// 8. Compress photo (resize + re-encode) before caching
+	originalSize := len(photoData)
+	compressed, err := photocache.CompressPhoto(
+		photoData,
+		uint(s.cfg.App.MaxPhotoDimension),
+		s.cfg.App.PhotoQuality,
+	)
+	if err != nil {
+		slog.Warn("photo compression failed, serving original",
+			"npm", req.NPM, "error", err)
+		// Non-fatal — use original bytes
+	} else {
+		photoData = compressed
+		// Overwrite disk file with compressed version
+		if writeErr := os.WriteFile(savePath, photoData, 0o644); writeErr != nil {
+			slog.Warn("failed to write compressed photo to disk",
+				"npm", req.NPM, "error", writeErr)
+		}
+		slog.Info("photo compressed",
+			"npm", req.NPM,
+			"original_bytes", originalSize,
+			"compressed_bytes", len(photoData),
+			"ratio", fmt.Sprintf("%.1f%%", float64(len(photoData))/float64(originalSize)*100))
+	}
+
+	// 9. Save metadata to cache
 	if err := s.photoCache.Set(req.NPM, photoData, filepath.Base(src)); err != nil {
 		slog.Warn("failed to cache photo metadata", "npm", req.NPM, "error", err)
 		// Non-fatal — still return photo

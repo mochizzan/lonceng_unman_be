@@ -41,6 +41,9 @@ type AppConfig struct {
 	ProfileBaseDir string
 	// Photo Cache
 	PhotoCacheTTL time.Duration
+	// Photo Compression
+	MaxPhotoDimension int
+	PhotoQuality      int
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -58,23 +61,25 @@ func New() (*Config, error) {
 
 	cfg := &Config{
 		App: AppConfig{
-			Name:            getEnv("APP_NAME", "lonceng_unman_be"),
-			Env:             getEnv("APP_ENV", "development"),
-			Port:            getEnv("APP_PORT", "3000"),
-			Host:            getEnv("APP_HOST", "0.0.0.0"),
-			LMSBaseURL:      getEnv("LMS_BASE_URL", "https://elearning.universitasmandiri.ac.id"),
-			LMSDashboardURL: getEnv("LMS_DASHBOARD_URL", "https://elearning.universitasmandiri.ac.id/admin/"),
-			BrowserHeadless: getEnvBool("BROWSER_HEADLESS", true),
-			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 60*time.Second),
-			DNSTimeout:      getEnvDuration("DNS_TIMEOUT", 5*time.Second),
-			DownloadDir:     getEnv("DOWNLOAD_DIR", "./downloads"),
-			ExtractDir:      getEnv("EXTRACT_DIR", "./extracted"),
-			SessionTTL:      getEnvDuration("SESSION_TTL", 15*time.Minute),
-			MaxSessions:     getEnvInt("MAX_SESSIONS", 15),
-			ProfileBaseDir:  getEnv("PROFILE_BASE_DIR", "./profiles"),
-			MaxBodySize:     parseByteSize(getEnv("MAX_BODY_SIZE", "1MB")),
-			MaxPDFSize:      parseByteSize(getEnv("MAX_PDF_SIZE", "50MB")),
-			PhotoCacheTTL:   getEnvDuration("PHOTO_CACHE_TTL", 15*time.Minute),
+			Name:              getEnv("APP_NAME", "lonceng_unman_be"),
+			Env:               getEnv("APP_ENV", "development"),
+			Port:              getEnv("APP_PORT", "3000"),
+			Host:              getEnv("APP_HOST", "0.0.0.0"),
+			LMSBaseURL:        getEnv("LMS_BASE_URL", "https://elearning.universitasmandiri.ac.id"),
+			LMSDashboardURL:   getEnv("LMS_DASHBOARD_URL", "https://elearning.universitasmandiri.ac.id/admin/"),
+			BrowserHeadless:   getEnvBool("BROWSER_HEADLESS", true),
+			BrowserTimeout:    getEnvDuration("BROWSER_TIMEOUT", 60*time.Second),
+			DNSTimeout:        getEnvDuration("DNS_TIMEOUT", 5*time.Second),
+			DownloadDir:       getEnv("DOWNLOAD_DIR", "./downloads"),
+			ExtractDir:        getEnv("EXTRACT_DIR", "./extracted"),
+			SessionTTL:        getEnvDuration("SESSION_TTL", 15*time.Minute),
+			MaxSessions:       getEnvInt("MAX_SESSIONS", 15),
+			ProfileBaseDir:    getEnv("PROFILE_BASE_DIR", "./profiles"),
+			MaxBodySize:       parseByteSize(getEnv("MAX_BODY_SIZE", "1MB")),
+			MaxPDFSize:        parseByteSize(getEnv("MAX_PDF_SIZE", "50MB")),
+			PhotoCacheTTL:     getEnvDuration("PHOTO_CACHE_TTL", 15*time.Minute),
+			MaxPhotoDimension: getEnvInt("MAX_PHOTO_DIMENSION", 300),
+			PhotoQuality:      getEnvInt("PHOTO_QUALITY", 80),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
@@ -120,6 +125,14 @@ func (c *Config) Validate() error {
 
 	if c.App.ExtractDir == "" {
 		return fmt.Errorf("extract_dir must not be empty")
+	}
+
+	if c.App.MaxPhotoDimension < 50 || c.App.MaxPhotoDimension > 2000 {
+		return fmt.Errorf("max_photo_dimension must be between 50 and 2000; got %d", c.App.MaxPhotoDimension)
+	}
+
+	if c.App.PhotoQuality < 1 || c.App.PhotoQuality > 100 {
+		return fmt.Errorf("photo_quality must be between 1 and 100; got %d", c.App.PhotoQuality)
 	}
 
 	return nil
