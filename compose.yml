@@ -88,11 +88,13 @@ services:
       - ./extracted:/data/extracted
       - ./profiles:/data/profiles
       # Tmpfs for /tmp — RAM-based, faster than disk, auto-cleaned on container stop
-      # Used by Chromium for cache, screenshots, and temp files
+      # Used by go-rod leakless binary and Chromium temp files
+      # exec: true required for go-rod to execute leakless binary
       - type: tmpfs
         target: /tmp
         tmpfs:
           size: 512M
+          exec: true
 
     # --- Resource Limits ---
     # Chromium is memory-hungry; ensure enough headroom
