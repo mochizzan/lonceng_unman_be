@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type AppConfig struct {
 	// Document Download
 	DownloadDir string
 	ExtractDir  string
+	EvalDir     string
 	// Session Management
 	SessionTTL  time.Duration
 	MaxSessions int
@@ -72,6 +74,7 @@ func New() (*Config, error) {
 			DNSTimeout:        getEnvDuration("DNS_TIMEOUT", 5*time.Second),
 			DownloadDir:       getEnv("DOWNLOAD_DIR", "./downloads"),
 			ExtractDir:        getEnv("EXTRACT_DIR", "./extracted"),
+			EvalDir:           getEnv("EVAL_DIR", "./eval/ground_truth"),
 			SessionTTL:        getEnvDuration("SESSION_TTL", 15*time.Minute),
 			MaxSessions:       getEnvInt("MAX_SESSIONS", 15),
 			ProfileBaseDir:    getEnv("PROFILE_BASE_DIR", "./profiles"),
@@ -87,6 +90,37 @@ func New() (*Config, error) {
 			AllowHeaders: getEnv("CORS_ALLOW_HEADERS", "Content-Type"),
 		},
 	}
+
+	// Resolve relative directory paths to absolute paths anchored at the
+	// process's current working directory. This is critical because the
+	// server may be launched from a CWD that differs from the project
+	// root (Windows shortcut, Task Scheduler, service host, Docker
+	// container with WORKDIR != /app, etc.). Without this, paths like
+	// "./downloads" would resolve against an arbitrary CWD and the
+	// server would fail to find files that are clearly present on disk.
+	absDownload, err := filepath.Abs(cfg.App.DownloadDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve download_dir: %w", err)
+	}
+	cfg.App.DownloadDir = absDownload
+
+	absExtract, err := filepath.Abs(cfg.App.ExtractDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve extract_dir: %w", err)
+	}
+	cfg.App.ExtractDir = absExtract
+
+	absEval, err := filepath.Abs(cfg.App.EvalDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve eval_dir: %w", err)
+	}
+	cfg.App.EvalDir = absEval
+
+	absProfile, err := filepath.Abs(cfg.App.ProfileBaseDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve profile_base_dir: %w", err)
+	}
+	cfg.App.ProfileBaseDir = absProfile
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
@@ -125,6 +159,10 @@ func (c *Config) Validate() error {
 
 	if c.App.ExtractDir == "" {
 		return fmt.Errorf("extract_dir must not be empty")
+	}
+
+	if c.App.EvalDir == "" {
+		return fmt.Errorf("eval_dir must not be empty")
 	}
 
 	if c.App.MaxPhotoDimension < 50 || c.App.MaxPhotoDimension > 2000 {

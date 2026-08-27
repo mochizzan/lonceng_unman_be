@@ -138,10 +138,24 @@ func (h *EvalHandler) loadPDFBase64(npm, docType, filename string) (string, PDFP
 		return "", info
 	}
 
-	// Try common PDF locations in priority order.
-	candidates := []string{
-		filepath.Join(h.pdfDir, npm, docType, replaceJSONWithPDF(filename)),
-		filepath.Join(h.pdfDir, npm, docType, filename),
+	// Resolve h.pdfDir to an absolute path so relative values like
+	// "./downloads" do not silently miss files when the process CWD
+	// differs from the directory the operator expects.
+	absPDFDir, absErr := filepath.Abs(h.pdfDir)
+	if absErr != nil {
+		absPDFDir = h.pdfDir
+	}
+
+	// Try common PDF locations in priority order. Both candidates are
+	// reported with their absolute form so the operator can see exactly
+	// where the server looked (vs. where the file actually is).
+	candidateNames := []string{
+		replaceJSONWithPDF(filename),
+		filename,
+	}
+	candidates := make([]string, 0, len(candidateNames))
+	for _, name := range candidateNames {
+		candidates = append(candidates, filepath.Join(absPDFDir, npm, docType, name))
 	}
 	info.TriedPaths = candidates
 
@@ -190,16 +204,28 @@ func (h *EvalHandler) loadPDFBase64(npm, docType, filename string) (string, PDFP
 		return base64.StdEncoding.EncodeToString(data), info
 	}
 
-	// No candidate matched — give a specific reason.
-	info.Reason = "Berkas PDF mentah tidak ditemukan di direktori unduhan. " +
+	// No candidate matched — give a specific reason that points the
+	// operator at the most likely root cause (CWD mismatch).
+	cwd, _ := os.Getwd()
+	reason := "Berkas PDF mentah tidak ditemukan di direktori unduhan. " +
 		"Pastikan dokumen sudah pernah diunduh (POST /api/v1/lms/krs atau /khs) " +
 		"sebelum mengedit ground truth."
+	if absPDFDir != h.pdfDir {
+		reason += fmt.Sprintf(
+			" Catatan: DOWNLOAD_DIR=%q telah di-resolve ke %q terhadap CWD=%q.",
+			h.pdfDir, absPDFDir, cwd,
+		)
+	}
+	info.Reason = reason
 	info.ReasonCode = "pdf_not_found"
 	slog.Warn(
 		"pdf preview unavailable: no candidate found",
 		"npm", npm,
 		"doc_type", docType,
 		"file", filename,
+		"pdf_dir", h.pdfDir,
+		"abs_pdf_dir", absPDFDir,
+		"cwd", cwd,
 		"tried_paths", candidates,
 	)
 	return "", info

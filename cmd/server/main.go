@@ -7,6 +7,7 @@ import (
 	"lonceng_unman_be/internal/config"
 	"lonceng_unman_be/internal/domain/entity"
 	"lonceng_unman_be/internal/infrastructure/browser"
+	"lonceng_unman_be/internal/infrastructure/evalstore"
 	"lonceng_unman_be/internal/infrastructure/extractor"
 	"lonceng_unman_be/internal/infrastructure/fibererror"
 	"lonceng_unman_be/internal/infrastructure/logger"
@@ -62,6 +63,15 @@ func main() {
 	studentProfileService := service.NewStudentProfileService(cfg, sessionMgr, studentProfileScraper, cache, photoCache)
 	studentProfileHandler := handler.NewStudentProfileHandler(studentProfileService)
 
+	// Wire eval store, service, and handlers
+	evalStore := evalstore.New(cfg.App.EvalDir, cfg.App.ExtractDir)
+	evalService := service.NewEvalService(evalStore)
+	evalHandler, err := handler.NewEvalHandler(evalService, cfg.App.EvalDir, cfg.App.DownloadDir)
+	if err != nil {
+		panic("failed to create eval handler: " + err.Error())
+	}
+	evalGTHandler := handler.NewEvalGTHandler(evalService)
+
 	// Wire HTTP handlers
 	healthHandler := handler.NewHealthHandler(healthService)
 	lmsHandler := handler.NewLMSHandler(lmsService)
@@ -69,7 +79,7 @@ func main() {
 	extractionHandler := handler.NewExtractionHandler(extractionService)
 
 	// Register routes
-	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler, studentProfileHandler)
+	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler, studentProfileHandler, evalHandler, evalGTHandler)
 
 	// Start server
 	log.Info(
@@ -77,6 +87,10 @@ func main() {
 		"app", cfg.App.Name,
 		"addr", cfg.Addr(),
 		"env", cfg.App.Env,
+		"download_dir", cfg.App.DownloadDir,
+		"extract_dir", cfg.App.ExtractDir,
+		"eval_dir", cfg.App.EvalDir,
+		"profile_base_dir", cfg.App.ProfileBaseDir,
 	)
 	if err := app.Listen(cfg.Addr()); err != nil {
 		log.Error("server error", "err", err)
