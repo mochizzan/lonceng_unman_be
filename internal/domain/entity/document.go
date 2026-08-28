@@ -75,11 +75,42 @@ func ValidSemester(s string) bool {
 	return s == SemesterGanjil || s == SemesterGenap
 }
 
+// DocumentType identifies the kind of academic document.
+type DocumentType string
+
 // Document type identifiers for KRS and KHS.
 const (
-	DocTypeKRS = "krs"
-	DocTypeKHS = "khs"
+	DocTypeKRS DocumentType = "krs"
+	DocTypeKHS DocumentType = "khs"
 )
+
+// IsValid reports whether d is a recognized document type.
+func (d DocumentType) IsValid() bool {
+	return d == DocTypeKRS || d == DocTypeKHS
+}
+
+// DirName returns the canonical directory name for this document type.
+func (d DocumentType) DirName() string {
+	return string(d)
+}
+
+// String returns the string representation of the document type.
+func (d DocumentType) String() string {
+	return string(d)
+}
+
+// RawDocument records metadata about a downloaded PDF file.
+type RawDocument struct {
+	NPM          string    `json:"npm"`
+	Type         string    `json:"type"`
+	FilePath     string    `json:"file_path"`
+	FileName     string    `json:"file_name"`
+	FileSize     int64     `json:"file_size"`
+	DownloadedAt time.Time `json:"downloaded_at"`
+	SourceURL    string    `json:"source_url"`
+	ContentHash  string    `json:"content_hash"`
+	IsValidPDF   bool      `json:"is_valid_pdf"`
+}
 
 // File extension constants.
 const (

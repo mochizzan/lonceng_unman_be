@@ -1,10 +1,13 @@
 package browser
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-rod/rod"
 )
@@ -79,7 +82,53 @@ func DownloadAndSave(page *rod.Page, url string, savePath string) (string, int, 
 		return "", 0, fmt.Errorf("save PDF: %w", err)
 	}
 
+	if err := writeMetadataSidecar(savePath, data, url); err != nil {
+		return "", 0, fmt.Errorf("write metadata sidecar: %w", err)
+	}
+
 	return filepath.Base(savePath), len(data), nil
+}
+
+// writeMetadataSidecar writes a .meta.json file alongside the saved PDF
+// containing provenance and integrity metadata.
+func writeMetadataSidecar(savePath string, data []byte, sourceURL string) error {
+	npm, docType := parseSavePath(savePath)
+
+	hash := sha256.Sum256(data)
+
+	meta := map[string]any{
+		"npm":           npm,
+		"type":          docType,
+		"file_path":     savePath,
+		"file_name":     filepath.Base(savePath),
+		"file_size":     len(data),
+		"downloaded_at": time.Now().UTC(),
+		"source_url":    sourceURL,
+		"content_hash":  fmt.Sprintf("%x", hash),
+		"is_valid_pdf":  len(data) > 4 && string(data[:4]) == "%PDF",
+	}
+
+	metaPath := savePath + ".meta.json"
+	metaJSON, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	if err := os.WriteFile(metaPath, metaJSON, 0o644); err != nil {
+		return fmt.Errorf("write metadata file: %w", err)
+	}
+
+	return nil
+}
+
+// parseSavePath extracts the NPM and document type from a save path.
+// Expected format: .../{NPM}/{docType}/{filename}.pdf
+func parseSavePath(savePath string) (npm string, docType string) {
+	dir := filepath.Dir(savePath)
+	docType = filepath.Base(dir)
+	parentDir := filepath.Dir(dir)
+	npm = filepath.Base(parentDir)
+	return npm, docType
 }
 
 // DownloadImage downloads an image from the given URL using JavaScript fetch()
