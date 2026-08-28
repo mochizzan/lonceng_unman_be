@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/eval/static/css/main.css">
+</head>
+<body>
+    <div class="dashboard">
+        {{template "sidebar" .}}
+
+        <div class="dashboard-main">
+            {{template "header" .}}
+
+            <main class="dashboard-content bg-body-tertiary">
+                <!-- Page Title -->
+                <div class="page-title">
+                    <h1><i class="bi bi-speedometer2 text-primary"></i> Dashboard Evaluasi</h1>
+                    <p class="text-body-secondary mb-0">Perbandingan Ground Truth vs Hasil Ekstraksi PDF — Agregat Matriks Konfusi</p>
+                </div>
+
+                <!-- Summary Cards -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3 col-sm-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <div class="flex-shrink-0 me-3">
+                                        <span class="neu-icon bg-primary bg-opacity-10 text-primary">
+                                            <i class="bi bi-people-fill fs-5"></i>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <p class="text-body-secondary mb-0 small">Total NPM</p>
+                                        <p class="fs-4 fw-bold mb-0">{{.TotalNPMs}}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <div class="flex-shrink-0 me-3">
+                                        <span class="neu-icon bg-info bg-opacity-10 text-info">
+                                            <i class="bi bi-file-earmark-text-fill fs-5"></i>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <p class="text-body-secondary mb-0 small">Total Raw Documents</p>
+                                        <p class="fs-4 fw-bold mb-0">{{.RawDocumentCount}}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <div class="flex-shrink-0 me-3">
+                                        <span class="neu-icon bg-primary bg-opacity-10 text-primary">
+                                            <i class="bi bi-file-earmark-check-fill fs-5"></i>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <p class="text-body-secondary mb-0 small">Total Extracted</p>
+                                        <p class="fs-4 fw-bold mb-0">{{.ExtractedCount}}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <div class="flex-shrink-0 me-3">
+                                        <span class="neu-icon bg-dark bg-opacity-10 text-dark">
+                                            <i class="bi bi-file-earmark-richtext-fill fs-5"></i>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <p class="text-body-secondary mb-0 small">Total Ground Truth</p>
+                                        <p class="fs-4 fw-bold mb-0">{{.GTCount}}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <div class="flex-shrink-0 me-3">
+                                        <span class="neu-icon bg-success bg-opacity-10 text-success">
+                                            <i class="bi bi-check2-circle fs-5"></i>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <p class="text-body-secondary mb-0 small">Paired</p>
+                                        <p class="fs-4 fw-bold mb-0">{{.PairedCount}}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center">
+                                    <div class="flex-shrink-0 me-3">
+                                        <span class="neu-icon bg-warning bg-opacity-10 text-warning">
+                                            <i class="bi bi-hourglass-split fs-5"></i>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <p class="text-body-secondary mb-0 small">Perlu GT</p>
+                                        <p class="fs-4 fw-bold mb-0">{{.NeedGTCount}}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Confusion Matrix Cards with Charts -->
+                <h4 class="fw-semibold mb-3"><i class="bi bi-grid-3x3-gap"></i> Matriks Konfusi Agregat</h4>
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0"><i class="bi bi-journal-text"></i> KRS — Matriks Konfusi</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-2 mb-3">
+                                    <div class="col-3">
+                                        <div class="p-2 bg-success bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">TP</p>
+                                            <p class="fs-5 fw-bold text-success mb-0">{{.KRSMetrics.Confusion.TP}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="p-2 bg-danger bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">FN</p>
+                                            <p class="fs-5 fw-bold text-danger mb-0">{{.KRSMetrics.Confusion.FN}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="p-2 bg-warning bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">FP</p>
+                                            <p class="fs-5 fw-bold text-warning mb-0">{{.KRSMetrics.Confusion.FP}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="p-2 bg-info bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">TN</p>
+                                            <p class="fs-5 fw-bold text-info mb-0">{{.KRSMetrics.Confusion.TN}}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-4">
+                                        <div class="p-2 bg-primary bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">Precision</p>
+                                            <p class="fs-6 fw-bold text-primary mb-0">{{printf "%.2f" .KRSMetrics.Precision}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="p-2 bg-primary bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">Recall</p>
+                                            <p class="fs-6 fw-bold text-primary mb-0">{{printf "%.2f" .KRSMetrics.Recall}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="p-2 bg-primary bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">F1</p>
+                                            <p class="fs-6 fw-bold text-primary mb-0">{{printf "%.2f" .KRSMetrics.F1}}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <canvas id="krsChart"
+                                    data-tp="{{.KRSMetrics.Confusion.TP}}"
+                                    data-fn="{{.KRSMetrics.Confusion.FN}}"
+                                    data-fp="{{.KRSMetrics.Confusion.FP}}"
+                                    data-tn="{{.KRSMetrics.Confusion.TN}}"
+                                    data-precision="{{printf "%.4f" .KRSMetrics.Precision}}"
+                                    data-recall="{{printf "%.4f" .KRSMetrics.Recall}}"
+                                    data-f1="{{printf "%.4f" .KRSMetrics.F1}}"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-success text-white">
+                                <h5 class="mb-0"><i class="bi bi-journal-check"></i> KHS — Matriks Konfusi</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-2 mb-3">
+                                    <div class="col-3">
+                                        <div class="p-2 bg-success bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">TP</p>
+                                            <p class="fs-5 fw-bold text-success mb-0">{{.KHSMetrics.Confusion.TP}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="p-2 bg-danger bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">FN</p>
+                                            <p class="fs-5 fw-bold text-danger mb-0">{{.KHSMetrics.Confusion.FN}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="p-2 bg-warning bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">FP</p>
+                                            <p class="fs-5 fw-bold text-warning mb-0">{{.KHSMetrics.Confusion.FP}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="p-2 bg-info bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">TN</p>
+                                            <p class="fs-5 fw-bold text-info mb-0">{{.KHSMetrics.Confusion.TN}}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-4">
+                                        <div class="p-2 bg-success bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">Precision</p>
+                                            <p class="fs-6 fw-bold text-success mb-0">{{printf "%.2f" .KHSMetrics.Precision}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="p-2 bg-success bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">Recall</p>
+                                            <p class="fs-6 fw-bold text-success mb-0">{{printf "%.2f" .KHSMetrics.Recall}}</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="p-2 bg-success bg-opacity-10 rounded text-center">
+                                            <p class="small text-body-secondary mb-0">F1</p>
+                                            <p class="fs-6 fw-bold text-success mb-0">{{printf "%.2f" .KHSMetrics.F1}}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <canvas id="khsChart"
+                                    data-tp="{{.KHSMetrics.Confusion.TP}}"
+                                    data-fn="{{.KHSMetrics.Confusion.FN}}"
+                                    data-fp="{{.KHSMetrics.Confusion.FP}}"
+                                    data-tn="{{.KHSMetrics.Confusion.TN}}"
+                                    data-precision="{{printf "%.4f" .KHSMetrics.Precision}}"
+                                    data-recall="{{printf "%.4f" .KHSMetrics.Recall}}"
+                                    data-f1="{{printf "%.4f" .KHSMetrics.F1}}"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Combined Bar Chart -->
+                <div class="row g-3 mb-4">
+                    <div class="col-12">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-dark text-white">
+                                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Perbandingan Metrik KRS vs KHS</h5>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="comparisonChart"
+                                    data-krs-precision="{{printf "%.4f" .KRSMetrics.Precision}}"
+                                    data-krs-recall="{{printf "%.4f" .KRSMetrics.Recall}}"
+                                    data-krs-f1="{{printf "%.4f" .KRSMetrics.F1}}"
+                                    data-khs-precision="{{printf "%.4f" .KHSMetrics.Precision}}"
+                                    data-khs-recall="{{printf "%.4f" .KHSMetrics.Recall}}"
+                                    data-khs-f1="{{printf "%.4f" .KHSMetrics.F1}}"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <script type="module" src="/eval/static/js/index.js"></script>
+            </main>
+        </div>
+    </div>
+
+    <!-- Mobile sidebar backdrop -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+    {{template "scripts" .}}
+</body>
+</html>

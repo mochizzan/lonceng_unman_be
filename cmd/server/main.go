@@ -64,9 +64,9 @@ func main() {
 	studentProfileHandler := handler.NewStudentProfileHandler(studentProfileService)
 
 	// Wire eval store, service, and handlers
-	evalStore := evalstore.New(cfg.App.EvalDir, cfg.App.ExtractDir)
+	evalStore := evalstore.New(cfg.App.EvalDir, cfg.App.ExtractDir, cfg.App.DownloadDir)
 	evalService := service.NewEvalService(evalStore)
-	evalHandler, err := handler.NewEvalHandler(evalService, cfg.App.EvalDir, cfg.App.DownloadDir)
+	evalHandler, err := handler.NewEvalHandler(evalService, cfg.App.EvalDir, cfg.App.DownloadDir, parser)
 	if err != nil {
 		panic("failed to create eval handler: " + err.Error())
 	}

@@ -125,15 +125,18 @@ func (h *EvalHandler) Index(c fiber.Ctx) error {
 	}
 
 	dashData := map[string]interface{}{
-		"Title":       "Dashboard Evaluasi",
-		"ActivePage":  "index",
-		"Breadcrumbs": []Breadcrumb{{Label: "Dashboard"}},
-		"TotalNPMs":   data.TotalNPMs,
-		"UnifiedRows": rows,
-		"KRSMetrics":  data.KRSMetrics,
-		"KHSMetrics":  data.KHSMetrics,
-		"PairedCount": paired,
-		"NeedGTCount": needGT,
+		"Title":            "Dashboard Evaluasi",
+		"ActivePage":       "index",
+		"Breadcrumbs":      []Breadcrumb{{Label: "Dashboard"}},
+		"TotalNPMs":        data.TotalNPMs,
+		"UnifiedRows":      rows,
+		"KRSMetrics":       data.KRSMetrics,
+		"KHSMetrics":       data.KHSMetrics,
+		"PairedCount":      paired,
+		"NeedGTCount":      needGT,
+		"RawDocumentCount": rawCount,
+		"ExtractedCount":   extractedCount,
+		"GTCount":          gtCount,
 	}
 
 	c.Set("Content-Type", "text/html")
