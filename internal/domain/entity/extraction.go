@@ -2,11 +2,22 @@ package entity
 
 import "time"
 
+// DocumentCategory discriminates the origin of a document.
+type DocumentCategory string
+
+const (
+	// CategoryExtracted marks documents produced by PDF extraction.
+	CategoryExtracted DocumentCategory = "extracted"
+	// CategoryGT marks documents created as ground truth.
+	CategoryGT DocumentCategory = "ground_truth"
+)
+
 // ExtractionMetadata contains metadata about the extraction process.
 type ExtractionMetadata struct {
-	ExtractedAt time.Time `json:"extracted_at"`
-	SourceFile  string    `json:"source_file"`
-	FileSize    int       `json:"file_size"`
+	ExtractedAt      time.Time        `json:"extracted_at"`
+	SourceFile       string           `json:"source_file"`
+	FileSize         int              `json:"file_size"`
+	DocumentCategory DocumentCategory `json:"document_category"`
 }
 
 // Mahasiswa represents shared student info used by both KRS and KHS.
