@@ -19,7 +19,7 @@ import (
 // newTestAppWithPDF wires the same routes as newTestApp but lets the caller
 // pass a non-empty pdfDir so the preview loader is actually exercised.
 func newTestAppWithPDF(svc *mockEvalService, pdfDir string) *fiber.App {
-	evalHandler, err := handler.NewEvalHandler(svc, "", pdfDir)
+	evalHandler, err := handler.NewEvalHandler(svc, "", "", pdfDir, nil)
 	if err != nil {
 		panic(err)
 	}

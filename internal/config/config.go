@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,6 +47,9 @@ type AppConfig struct {
 	// Photo Compression
 	MaxPhotoDimension int
 	PhotoQuality      int
+	// Eval Dashboard Auth
+	EvalSecret string // SECRET_KEY (empty = fail-closed)
+	AutoLogin  bool   // AUTO_LOGIN (dev bypass, cannot be true in production)
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -83,6 +87,8 @@ func New() (*Config, error) {
 			PhotoCacheTTL:     getEnvDuration("PHOTO_CACHE_TTL", 15*time.Minute),
 			MaxPhotoDimension: getEnvInt("MAX_PHOTO_DIMENSION", 300),
 			PhotoQuality:      getEnvInt("PHOTO_QUALITY", 80),
+			EvalSecret:        getEnv("SECRET_KEY", ""),
+			AutoLogin:         getEnvBool("AUTO_LOGIN", false),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
@@ -171,6 +177,10 @@ func (c *Config) Validate() error {
 
 	if c.App.PhotoQuality < 1 || c.App.PhotoQuality > 100 {
 		return fmt.Errorf("photo_quality must be between 1 and 100; got %d", c.App.PhotoQuality)
+	}
+
+	if c.App.AutoLogin && c.App.Env == "production" {
+		return errors.New("AUTO_LOGIN cannot be true in production")
 	}
 
 	return nil

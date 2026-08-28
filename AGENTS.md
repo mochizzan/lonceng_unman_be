@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-> **IMPORTANT:** All agents MUST read this file before making any changes to the codebase.
+> **IMPORTANT:** All agents MUST read this file before making changes to the codebase.
 
 ---
 
@@ -15,9 +15,30 @@
 |**PDF Library**|razvandimescu/gopdf v0.9.5|
 |**Browser Automation**|go-rod v0.116.2|
 |**Architecture**|Clean Architecture (4-layer)|
-|**Development OS**|Windows 10 Pro (NOT Unix/Linux/Mac)|
-|**Shell / Bash**|Git Bash (MSYS2) — NOT WSL, NOT PowerShell, NOT cmd|
 |**Module Path**|`lonceng_unman_be`|
+
+### Development Environment
+
+|Component|Value|
+|---|---|
+|**Host OS**|Windows 10 Pro|
+|**Shell / Bash**|Git Bash (MSYS2) — NOT WSL, NOT PowerShell, NOT cmd|
+|**Container Runtime**|Docker Desktop on Windows 10|
+|**Go Version**|1.26.4 (via Docker or local install)|
+
+Development runs inside Docker Desktop containers on Windows 10. The application uses multi-stage Docker builds with Alpine Linux + Chromium for headless browser automation. Local development uses `go run` or `go build` with Git Bash.
+
+### Production Environment
+
+|Component|Value|
+|---|---|
+|**Deployment Method**|Docker image push to container registry (manual)|
+|**Container Registry**|GitHub Container Registry (GHCR)|
+|**Image URI**|`ghcr.io/mochizzan/lonceng_unman_be:latest`|
+|**Runtime**|Docker Desktop on Windows 10 (same host as development)|
+|**Network Access**|cloudflared tunnel on Windows host → `localhost:3000`|
+
+Production is deployed via Git repository using container images from GHCR. The application runs on Docker Desktop on Windows 10, with network access provided by a cloudflared tunnel running on the Windows host. Deployment is manual — no CI/CD pipeline (no GitHub Actions workflow).
 
 **Lonceng Unman Backend** is a RESTful API for automated LMS (Learning Management System) document extraction. It logs into an academic LMS via headless Chrome, downloads KRS (course registration) and KHS (grade report) PDFs, parses them into structured JSON using position-based PDF extraction, and caches results. No database — all data is in-memory or file-based.
 
@@ -38,17 +59,20 @@ internal/
 │   │   ├── lms.go                    ← LoginRequest, LoginResult
 │   │   ├── document.go               ← KRS/KHS download requests/results, KHSFilename
 │   │   ├── extraction.go             ← KRSExtraction, KHSExtraction, ExtractionResult
+│   │   ├── eval.go                   ← Metrics, ConfusionCounts, CompareRow, etc.
 │   │   └── student_profile.go        ← StudentProfile, StudentProfileRequest
 │   └── port/                         ← Interfaces for outer layers
 │       ├── browser.go                ← BrowserSession interface
 │       ├── session.go                ← SessionManager interface
 │       ├── extraction.go             ← PDFParser, ExtractionCache interfaces
-│       ├── lms_config.go             ← LMSConfig interface (CSS selectors, URL paths)
-│       └── student_profile_scraper.go← StudentProfileScraper interface
+│       ├── eval.go                   ← EvalStore, EvalService interfaces
+│       ├── student_profile_scraper.go← StudentProfileScraper interface
+│       └── lms_config.go             ← LMSConfig constants (CSS selectors, URL paths)
 ├── application/service/              ← Layer 2: Business logic implementations
 │   ├── health_service.go             ← HealthChecker interface + impl
 │   ├── lms_service.go                ← LMSLogin + LMSDocumentService interfaces + impl
 │   ├── extraction_service.go         ← ExtractionService interface + impl
+│   ├── eval_service.go               ← EvalService (ground-truth comparison)
 │   └── student_profile_service.go    ← StudentProfileService (scrape, get, get photo)
 ├── interfaces/http/                  ← Layer 3: HTTP transport
 │   ├── handler/                      ← Request handlers (depend on service interfaces)
@@ -56,8 +80,10 @@ internal/
 │   │   ├── lms_handler.go            ← LMSHandler (→ service.LMSLogin)
 │   │   ├── document_handler.go       ← DocumentHandler (→ service.LMSDocumentService)
 │   │   ├── extraction_handler.go     ← ExtractionHandler (→ service.ExtractionService)
-│   │   └── student_profile_handler.go← StudentProfileHandler (→ service.StudentProfileService)
-│   ├── router/router.go              ← 13 routes under /api/v1
+│   │   ├── student_profile_handler.go← StudentProfileHandler (→ service.StudentProfileService)
+│   │   ├── eval_handler.go           ← EvalHandler (HTML pages + JSON APIs)
+│   │   └── eval_gt_handler.go        ← EvalGTHandler (save ground truth)
+│   ├── router/router.go              ← 12 routes under /api/v1
 │   └── response/response.go          ← Uniform JSON response envelope (Success/Error)
 └── infrastructure/                   ← Layer 4: External implementations
     ├── middleware/middleware.go       ← recover → requestid → logger → gzip → cors
@@ -67,7 +93,7 @@ internal/
     │   ├── browser.go                ← go-rod Browser wrapper
     │   ├── selectors.go              ← CSS selectors + URL paths for LMS
     │   ├── download.go               ← PDF/image download via JS fetch()
-    │   └── scraper.go                ← StudentProfileScraper (browser automation for profile)
+    │   └── scraper.go                ← StudentProfileScraper (browser automation)
     ├── session/
     │   ├── manager.go                ← In-memory session cache with TTL + Chrome profile persistence
     │   └── session.go                ← rodSession: thread-safe BrowserSession impl
@@ -77,6 +103,8 @@ internal/
     │   ├── krs_parser.go             ← Structured KRS extraction from PDF (position-based)
     │   ├── khs_parser.go             ← Structured KHS extraction from PDF (position-based)
     │   └── cache.go                  ← File-based extraction cache + MarshalJSON
+    ├── evalstore/
+    │   └── evalstore.go              ← File-based ground truth + extraction storage
     └── photocache/
         └── cache.go                  ← Student photo file cache with TTL + JSON metadata
 ```
@@ -144,12 +172,13 @@ handler returns apperror.* → fibererror ErrorHandler
 |`internal/infrastructure/browser/`|go-rod browser automation|
 |`internal/infrastructure/session/`|Session management + Chrome profiles|
 |`internal/infrastructure/extractor/`|PDF extraction + caching|
+|`internal/infrastructure/evalstore/`|Ground truth + extraction file storage|
 |`internal/infrastructure/photocache/`|Student photo file cache|
 |`tests/`|External test packages (mirrors internal/)|
 |`downloads/`|Runtime PDF download directory (gitignored)|
 |`extracted/`|Runtime extraction cache directory (gitignored)|
 |`profiles/`|Persistent Chrome profile directories (gitignored)|
-|`docs/`|Design documents and implementation plans|
+|`docs/`|UML diagrams, API docs, implementation plans, design specs|
 
 ---
 
@@ -168,6 +197,25 @@ go build -o ./bin/server.exe ./cmd/server
 run.cmd
 ```
 
+### Docker
+
+```bash
+# Build Docker image locally
+docker compose build
+
+# Run container locally (pulls from GHCR in production config)
+docker compose up -d
+
+# View container logs
+docker compose logs -f lonceng-api
+
+# Stop containers
+docker compose down
+
+# Build with version tag
+docker compose build --build-arg VERSION=1.0.0 --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+```
+
 ### Test
 
 ```bash
@@ -181,12 +229,16 @@ go test ./tests/extractor/ -v
 go test ./tests/service/ -v
 go test ./tests/fibererror/ -v
 go test ./tests/student_profile/ -v
+go test ./tests/eval/ -v
 
 # Run with verbose output
 go test ./tests/... -v
 
 # Run specific test function
 go test ./tests/config/ -run TestLoadConfig -v
+
+# Skip integration tests (those requiring PDF files)
+go test ./tests/extractor/ -run TestParseKRS -v  # Skips if no PDF available
 ```
 
 ### Lint & Vet
@@ -221,6 +273,7 @@ return apperror.NotFound("user not found", err)      // with internal cause
 return apperror.Internal("database failed", err)      // 500 with cause
 return apperror.Unauthorized("LMS login failed")     // 401
 return apperror.Forbidden("permission denied")        // 403
+return apperror.Conflict("already exists")            // 409
 
 // WRONG — never do this
 c.SendStatus(400)
@@ -274,9 +327,12 @@ cfg.App.Port       // from APP_PORT (default: "3000")
 cfg.App.Host       // from APP_HOST (default: "0.0.0.0")
 cfg.App.DownloadDir  // from DOWNLOAD_DIR (default: "./downloads")
 cfg.App.ExtractDir   // from EXTRACT_DIR (default: "./extracted")
+cfg.App.EvalDir      // from EVAL_DIR (default: "./eval/ground_truth")
 cfg.App.MaxSessions  // from MAX_SESSIONS (default: 15)
 cfg.App.SessionTTL   // from SESSION_TTL (default: 15m)
 cfg.App.PhotoCacheTTL// from PHOTO_CACHE_TTL (default: 15m)
+cfg.App.MaxBodySize  // from MAX_BODY_SIZE (default: 1MB)
+cfg.App.MaxPDFSize   // from MAX_PDF_SIZE (default: 50MB)
 ```
 
 ### Middleware Order
@@ -337,7 +393,7 @@ var _ service.HealthChecker = service.NewHealthService(cfg)
 |File|Purpose|
 |---|---|
 |`cmd/server/main.go`|Application entry point, DI wiring, Fiber app setup|
-|`internal/interfaces/http/router/router.go`|All route definitions (13 routes)|
+|`internal/interfaces/http/router/router.go`|All route definitions (12 routes)|
 |`internal/config/config.go`|Config struct with env loading, validation, typed defaults|
 
 ### Configuration
@@ -349,17 +405,22 @@ var _ service.HealthChecker = service.NewHealthService(cfg)
 |`internal/config/config.go`|Config struct, validation, env parsing|
 |`go.mod`|Go module definition and dependencies|
 |`run.cmd`|Windows build-and-run script|
+|`Dockerfile`|Multi-stage Docker build (Go builder → Alpine + Chromium runtime)|
+|`compose.yml`|Docker Compose configuration for production deployment|
+|`.dockerignore`|Docker build context exclusions|
 
 ### Documentation
 
 |File|Purpose|
 |---|---|
 |`README.md`|Project README (Indonesian)|
-|`docs/`|API documentation per endpoint (12 files)|
-|`docs/ENVIRONMENT.md`|Environment variable reference|
-|`docs/ERROR_HANDLING.md`|Error handling documentation|
-|`docs/FOLDER_STRUCTURE.md`|Directory structure guide|
-|`SESSION_CACHE_RECOMMENDATION.md`|Chrome profile persistence design|
+|`docs/architecture/`|UML diagrams (use case, class, statechart, sequence, robustness)|
+|`docs/api/`|API documentation per endpoint (12 files) + DATA_TYPES, ENVIRONMENT, ERROR_HANDLING, FOLDER_STRUCTURE|
+|`docs/flow-docs/KRS_PARSER_FLOW.md`|KRS extraction pipeline documentation|
+|`docs/flow-docs/PDF_PARSER_FLOW.md`|8-phase PDF parser pipeline|
+|`docs/flow-docs/SESSION_CACHE_RECOMMENDATION.md`|Chrome profile persistence design|
+|`docs/superpowers/plans/`|Implementation plans (7 feature evolution docs)|
+|`docs/superpowers/specs/`|Design specs (KHS dedup fix)|
 
 ---
 
@@ -368,9 +429,10 @@ var _ service.HealthChecker = service.NewHealthService(cfg)
 ### Required Runtime
 
 - **Go 1.26.4** — module requires this version
-- **Windows 10 Pro** — development environment
+- **Windows 10 Pro** — host OS for development and production
 - **Git Bash (MSYS2)** — shell for commands (NOT WSL, NOT PowerShell, NOT cmd)
-- **Chrome/Chromium** — required for go-rod browser automation
+- **Docker Desktop** — container runtime for development and production
+- **Chrome/Chromium** — required for go-rod browser automation (installed in container)
 
 ### Dependencies
 
@@ -390,9 +452,10 @@ var _ service.HealthChecker = service.NewHealthService(cfg)
 
 - `go build` — standard Go build
 - `run.cmd` — Windows batch script for build + run
-- No Makefile, no Docker, no golangci-lint config
+- `docker build` — multi-stage Docker build (Go builder → Alpine + Chromium runtime)
+- `docker compose` — production deployment orchestration
 
-### Environment Variables (20+)
+### Environment Variables (22+)
 
 Key variables from `.env.example`:
 
@@ -415,6 +478,7 @@ DNS_TIMEOUT=5s
 # Paths
 DOWNLOAD_DIR=./downloads
 EXTRACT_DIR=./extracted
+EVAL_DIR=./eval/ground_truth
 PROFILE_BASE_DIR=./profiles
 
 # Session
@@ -432,6 +496,9 @@ MAX_PDF_SIZE=50MB
 CORS_ALLOW_ORIGINS=*
 CORS_ALLOW_METHODS=GET,POST,OPTIONS
 CORS_ALLOW_HEADERS=Content-Type
+
+# Timezone
+TZ=Asia/Jakarta
 ```
 
 ---
@@ -445,30 +512,35 @@ CORS_ALLOW_HEADERS=Content-Type
 - **Table-driven tests** — preferred pattern for multiple test cases
 - **Subtests** — `t.Run("name", func(t *testing.T) { ... })` for organized cases
 
-### Test Organization
+### Test Organization (14 files, 8 packages)
 
 ```
 tests/
-├── config/config_test.go          ← Config loading, validation, env parsing
-├── logger/logger_test.go          ← Logger creation per environment
-├── apperror/apperror_test.go      ← Error constructors, errors.As/unwrapping
-├── service/health_service_test.go ← HealthService.Check() + interface compliance
-├── fibererror/handler_test.go     ← Fiber error handler integration tests
+├── config/config_test.go                  ← Config loading, validation, env parsing
+├── logger/logger_test.go                  ← Logger creation per environment
+├── apperror/apperror_test.go              ← Error constructors, errors.As/unwrapping
+├── service/
+│   ├── health_service_test.go             ← HealthService.Check() + interface compliance
+│   └── eval_service_test.go              ← Course matching logic (MatchCourses, CompareFields)
+├── fibererror/handler_test.go             ← Fiber error handler integration tests
 ├── extractor/
-│   ├── parse_header_test.go       ← NormalizeLabel with table-driven subtests
-│   ├── khs_parser_test.go         ← KHS parsing with conditional integration
-│   └── krs_parser_test.go         ← KRS parsing with conditional integration
+│   ├── parse_header_test.go               ← NormalizeLabel with table-driven subtests
+│   ├── khs_parser_test.go                 ← KHS parsing with conditional integration
+│   └── krs_parser_test.go                 ← KRS parsing with conditional integration
 ├── student_profile/
-│   ├── handler_test.go            ← StudentProfile HTTP handler tests (scrape, get, photo)
-│   ├── service_test.go            ← StudentProfile service tests with mocks
-│   └── entity_test.go             ← Student profile entity tests
+│   ├── handler_test.go                    ← StudentProfile HTTP handler tests (scrape, get, photo)
+│   ├── service_test.go                    ← StudentProfile service tests with mocks
+│   └── entity_test.go                     ← Student profile entity JSON tests
+└── eval/
+    ├── handler_test.go                    ← Eval handler tests (Index, Student, EditKRS, EditKHS, SaveKRS, SaveKHS)
+    └── preview_test.go                    ← PDF preview integration tests with t.TempDir()
 ```
 
 ### Test Naming Convention
 
 ```go
 func TestFunctionName_Behavior(t *testing.T) {
-    // Example:
+    // Examples:
     func TestLoadConfig_ValidEnv(t *testing.T) { ... }
     func TestParseKHS_FileNotFound(t *testing.T) { ... }
     func TestNotFound(t *testing.T) { ... }
@@ -492,7 +564,7 @@ go test ./tests/student_profile/ -v
 go test ./tests/config/ -run TestLoadConfig -v
 
 # Skip integration tests (those requiring PDF files)
-go test ./tests/extractor/ -run TestParseKHS -v  # Skips if no PDF available
+go test ./tests/extractor/ -run TestParseKRS -v  # Skips if no PDF available
 ```
 
 ### Test Patterns
@@ -569,6 +641,16 @@ func (m *mockCache) Set(key string, data []byte) error { return m.setFn(key, dat
 - **Regression tests** for edge cases (deduplication, boundary conditions)
 - Run `go vet ./...` before commits — catches common issues
 
+### Known Test Gaps
+
+- No tests for `cmd/server/main.go` (New has no covering tests)
+- No tests for `internal/infrastructure/evalstore`
+- Extractor tests are no-ops without testdata fixtures (directory is empty)
+- No tests for photocache, session manager infrastructure implementations
+- No tests for middleware (CORS, auth, etc.)
+- No benchmark tests
+- No concurrent/parallel execution tests
+
 ---
 
 ## Git Conventions
@@ -599,6 +681,7 @@ fix/<bug-description>  # e.g., fix/khs-dedup-error
 - **No force push** to shared branches
 - **No merge** without explicit user command
 - **All code and comments** in English
+- **Documentation** in Indonesian (Bahasa Indonesia)
 
 ---
 
@@ -612,10 +695,19 @@ fix/<bug-description>  # e.g., fix/khs-dedup-error
 6. **Middleware order** — Strict: recover → requestid → logger → gzip → cors
 7. **Windows paths** — Use forward slashes in Go code, quote paths with spaces
 8. **go-rod** — Use non-Must methods (return errors) in production code
+9. **go-rod Eval** — Requires async function expressions `async () => {}`, NOT IIFEs or arrow function declarations
+10. **Browser timeout** — `BROWSER_TIMEOUT=60s` minimum for cold starts
+11. **TMPDIR** — Must be appuser-owned (go-rod leakless requirement)
+12. **Session lifecycle** — Always `defer session.Close()` and `defer sessionMgr.Stop()`
+13. **Photo compression** — HTTP gzip doesn't compress JPEGs — use image-level compression (`photocache.CompressPhoto`)
+14. **AGENTS.md is gitignored** — Use `git add -f AGENTS.md` to track it
+15. **NPM validation** — Digits only (`^[0-9]+$`), 8-12 chars (defined in `document_handler.go`)
+16. **Response envelope inconsistency** — `Status` field uses string "success"/"error"; flagged for unification before msgpack migration
+17. **LICENSE inconsistency** — README badge says MIT but LICENSE file is The Unlicense
 
 ---
 
-## API Endpoints
+## API Endpoints (12 total)
 
 |Method|Path|Handler|Description|
 |---|---|---|---|
@@ -631,6 +723,17 @@ fix/<bug-description>  # e.g., fix/khs-dedup-error
 |`POST`|`/api/v1/lms/student-profile`|StudentProfileHandler.Scrape|Scrape student profile|
 |`POST`|`/api/v1/lms/student-profile/data`|StudentProfileHandler.Get|Get cached profile data|
 |`POST`|`/api/v1/lms/student-profile/photo`|StudentProfileHandler.GetPhoto|Get student photo|
+
+Additional eval endpoints (HTML pages + JSON APIs):
+- `GET /eval/` — Evaluation dashboard index
+- `GET /eval/:npm` — Per-student evaluation
+- `GET /eval/:npm/krs/:file` — KRS page
+- `GET /eval/:npm/khs/:file` — KHS page
+- `POST /eval/:npm/krs/:file` — Save KRS ground truth
+- `POST /eval/:npm/khs/:file` — Save KHS ground truth
+- `GET /eval/api/student-list` — Student list JSON
+- `POST /eval/api/auto-extract/krs` — Auto-extract KRS
+- `POST /eval/api/auto-extract/khs` — Auto-extract KHS
 
 ---
 
@@ -677,9 +780,9 @@ type SessionManager interface {
 
 ```go
 type PDFParser interface {
-    ParseKRS(path string) (*entity.KRSExtraction, error)
-    ParseKHS(path string) (*entity.KHSExtraction, error)
-    MarshalToJSON(data any) ([]byte, error)
+    ParseKRS(path string, npm string) (*entity.KRSExtraction, error)
+    ParseKHS(path string, npm string, tahunAjaran string, semester string) (*entity.KHSExtraction, error)
+    MarshalToJSON(v interface{}) ([]byte, error)
 }
 ```
 
@@ -687,10 +790,32 @@ type PDFParser interface {
 
 ```go
 type ExtractionCache interface {
-    Get(key string) ([]byte, error)
-    Set(key string, data []byte) error
-    Exists(key string) (bool, error)
-    Invalidate(key string) error
+    Get(npm, docType, filename string) ([]byte, error)
+    Set(npm, docType, filename string, data []byte) error
+    Exists(npm, docType, filename string) bool
+    GetModTime(npm, docType, filename string) (time.Time, error)
+    Invalidate(npm, docType, filename string) error
+}
+```
+
+### StudentProfileScraper (`internal/domain/port/student_profile_scraper.go`)
+
+```go
+type StudentProfileScraper interface {
+    Scrape(session BrowserSession, lmsBaseURL string) (*entity.StudentProfile, error)
+}
+```
+
+### EvalStore (`internal/domain/port/eval.go`)
+
+```go
+type EvalStore interface {
+    ListNPMs() ([]string, error)
+    ListDocs(npm string) ([]entity.NPMDoc, error)
+    LoadGT(npm, docType, filename string) ([]byte, error)
+    LoadExtract(npm, docType, filename string) ([]byte, error)
+    WriteGT(npm, docType, filename string, data []byte) error
+    Exists(npm, docType, filename string) (bool, bool, error)
 }
 ```
 

@@ -50,6 +50,7 @@ type DocEval struct {
 	Paired      bool              `json:"paired"`
 	HasGT       bool              `json:"has_gt"`
 	HasExtract  bool              `json:"has_extract"`
+	HasRaw      bool              `json:"has_raw"`
 	Semester    string            `json:"semester,omitempty"`
 	TahunAjaran string            `json:"tahun_ajaran,omitempty"`
 	Metrics     Metrics           `json:"metrics"`

@@ -1,0 +1,553 @@
+/* ============================================================================
+   pipeline.css — Pipeline Visualization page: neumorphic pipeline phases
+   and continuous data-flow animation. Depends on main.css tokens
+   (--neu-*, --eval-*) — do NOT redefine them here.
+   ============================================================================ */
+
+/* ---- Animation duration tokens (overridable from JS) -------------------- */
+:root {
+    --pipeline-particle-duration: 2.4s;
+    --pipeline-pulse-duration: 1.8s;
+    --pipeline-progress-duration: 4s;
+    --pipeline-glow-duration: 2s;
+    --pipeline-stage-transition: 0.45s;
+    --pipeline-particle-size: 12px;
+}
+
+/* ---- Pipeline phase cards (Formulas tab) -------------------------------- */
+.pipeline-phase-card {
+    position: relative;
+    background: var(--neu-surface);
+    border: none;
+    border-radius: var(--neu-radius);
+    box-shadow: var(--neu-out-sm);
+    transition: box-shadow var(--pipeline-stage-transition) ease,
+                transform var(--pipeline-stage-transition) ease;
+    overflow: hidden;
+}
+
+.pipeline-phase-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 5px;
+    border-radius: var(--neu-radius) 0 0 var(--neu-radius);
+    background: var(--eval-primary);
+    transition: width var(--pipeline-stage-transition) ease,
+                box-shadow var(--pipeline-stage-transition) ease;
+}
+
+/* Per-phase accent colors via nth-child */
+.pipeline-phase-card:nth-child(5n+1)::before { background: var(--eval-primary); }
+.pipeline-phase-card:nth-child(5n+2)::before { background: var(--eval-success); }
+.pipeline-phase-card:nth-child(5n+3)::before { background: var(--eval-warning); }
+.pipeline-phase-card:nth-child(5n+4)::before { background: var(--eval-danger); }
+.pipeline-phase-card:nth-child(5n+5)::before { background: var(--eval-info); }
+
+.pipeline-phase-card:hover {
+    box-shadow: var(--neu-out-lg);
+    transform: translateY(-3px);
+}
+
+.pipeline-phase-card:hover::before {
+    width: 7px;
+    box-shadow: 0 0 12px rgba(52, 152, 219, 0.4);
+}
+
+/* Phase number badge */
+.pipeline-phase-card .phase-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--eval-primary) 0%, #2980b9 100%);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.95rem;
+    box-shadow: var(--neu-out-sm);
+    flex-shrink: 0;
+    transition: transform var(--pipeline-stage-transition) ease,
+                box-shadow var(--pipeline-stage-transition) ease;
+}
+
+.pipeline-phase-card:hover .phase-number {
+    transform: scale(1.1);
+    box-shadow: var(--neu-out);
+}
+
+/* Formula code block */
+.pipeline-phase-card .phase-formula {
+    display: block;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    background: var(--neu-bg);
+    border-radius: var(--neu-radius-sm);
+    box-shadow: var(--neu-in-sm);
+    font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    color: var(--bs-body-color);
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Source file reference */
+.pipeline-phase-card .phase-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+    font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+    opacity: 0.8;
+}
+
+.pipeline-phase-card .phase-source::before {
+    content: "§";
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--eval-primary);
+    opacity: 0.6;
+}
+
+/* Visual diagram container */
+.pipeline-phase-card .phase-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+    background: var(--neu-bg);
+    border-radius: var(--neu-radius-sm);
+    box-shadow: var(--neu-in-sm);
+    min-height: 48px;
+}
+
+/* Diagram boxes */
+.pipeline-phase-card .diagram-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    height: 32px;
+    padding: 0 0.65rem;
+    border-radius: var(--neu-radius-sm);
+    background: linear-gradient(135deg, var(--eval-primary) 0%, #2980b9 100%);
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    box-shadow: var(--neu-out-sm);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pipeline-phase-card .diagram-box:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--neu-out);
+}
+
+.pipeline-phase-card .diagram-box.success {
+    background: linear-gradient(135deg, var(--eval-success) 0%, #219a52 100%);
+}
+
+.pipeline-phase-card .diagram-box.warning {
+    background: linear-gradient(135deg, var(--eval-warning) 0%, #e67e22 100%);
+}
+
+.pipeline-phase-card .diagram-box.danger {
+    background: linear-gradient(135deg, var(--eval-danger) 0%, #c0392b 100%);
+}
+
+.pipeline-phase-card .diagram-box.info {
+    background: linear-gradient(135deg, var(--eval-info) 0%, #138496 100%);
+}
+
+/* ============================================================================
+   ANIMATION TAB — Data-flow visualization
+   ============================================================================ */
+
+/* Animation container — neumorphic inset */
+#pipeline-animation-container {
+    position: relative;
+    width: 100%;
+    min-height: 320px;
+    padding: 2rem;
+    background: var(--neu-bg);
+    border-radius: var(--neu-radius);
+    box-shadow: var(--neu-in);
+    overflow: hidden;
+}
+
+/* Subtle grid pattern overlay */
+#pipeline-animation-container::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        radial-gradient(circle at 1px 1px, rgba(163, 177, 198, 0.15) 1px, transparent 0);
+    background-size: 24px 24px;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Stage boxes — absolute positioned */
+.pipeline-stage {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 110px;
+    min-height: 70px;
+    padding: 0.75rem 1rem;
+    background: var(--neu-surface);
+    border-radius: var(--neu-radius-sm);
+    box-shadow: var(--neu-out);
+    transition: box-shadow var(--pipeline-stage-transition) ease,
+                transform var(--pipeline-stage-transition) ease,
+                opacity var(--pipeline-stage-transition) ease;
+    z-index: 2;
+    cursor: default;
+    user-select: none;
+}
+
+.pipeline-stage .stage-icon {
+    font-size: 1.3rem;
+    margin-bottom: 0.25rem;
+    color: var(--bs-secondary-color);
+    transition: color var(--pipeline-stage-transition) ease;
+}
+
+.pipeline-stage .stage-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--bs-body-color);
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Active stage — glowing primary shadow */
+.pipeline-stage.active {
+    box-shadow:
+        var(--neu-out-lg),
+        0 0 20px rgba(52, 152, 219, 0.45),
+        0 0 40px rgba(52, 152, 219, 0.2);
+    transform: scale(1.08);
+    animation: stage-pulse var(--pipeline-pulse-duration) ease-in-out infinite;
+}
+
+.pipeline-stage.active .stage-icon {
+    color: var(--eval-primary);
+}
+
+.pipeline-stage.active .stage-label {
+    color: var(--eval-primary);
+}
+
+/* Completed stage — dimmed */
+.pipeline-stage.completed {
+    opacity: 0.55;
+    box-shadow: var(--neu-out-sm);
+    transform: scale(0.95);
+    filter: grayscale(0.3);
+}
+
+.pipeline-stage.completed .stage-icon {
+    color: var(--eval-success);
+}
+
+/* ============================================================================
+   CONNECTORS — lines/arrows between stages
+   ============================================================================ */
+.pipeline-connector {
+    position: absolute;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.pipeline-connector svg {
+    overflow: visible;
+}
+
+.pipeline-connector .connector-line {
+    fill: none;
+    stroke: var(--neu-dark);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    transition: stroke var(--pipeline-stage-transition) ease;
+}
+
+.pipeline-connector.active .connector-line {
+    stroke: var(--eval-primary);
+    filter: drop-shadow(0 0 4px rgba(52, 152, 219, 0.5));
+    animation: connector-glow var(--pipeline-glow-duration) ease-in-out infinite;
+}
+
+.pipeline-connector .connector-arrow {
+    fill: var(--neu-dark);
+    transition: fill var(--pipeline-stage-transition) ease;
+}
+
+.pipeline-connector.active .connector-arrow {
+    fill: var(--eval-primary);
+}
+
+/* ============================================================================
+   DATA PARTICLES — animated circles flowing between stages
+   ============================================================================ */
+.data-particle {
+    position: absolute;
+    width: var(--pipeline-particle-size);
+    height: var(--pipeline-particle-size);
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%,
+        rgba(255, 255, 255, 0.9) 0%,
+        var(--eval-primary) 40%,
+        #2980b9 100%);
+    box-shadow:
+        0 0 8px rgba(52, 152, 219, 0.6),
+        0 0 16px rgba(52, 152, 219, 0.3);
+    z-index: 3;
+    pointer-events: none;
+    will-change: transform, opacity;
+}
+
+.data-particle.flow {
+    animation: particle-flow var(--pipeline-particle-duration) cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.data-particle.success {
+    background: radial-gradient(circle at 35% 35%,
+        rgba(255, 255, 255, 0.9) 0%,
+        var(--eval-success) 40%,
+        #219a52 100%);
+    box-shadow:
+        0 0 8px rgba(39, 174, 96, 0.6),
+        0 0 16px rgba(39, 174, 96, 0.3);
+}
+
+.data-particle.warning {
+    background: radial-gradient(circle at 35% 35%,
+        rgba(255, 255, 255, 0.9) 0%,
+        var(--eval-warning) 40%,
+        #e67e22 100%);
+    box-shadow:
+        0 0 8px rgba(243, 156, 18, 0.6),
+        0 0 16px rgba(243, 156, 18, 0.3);
+}
+
+/* ============================================================================
+   PROGRESS INDICATOR — bar at the bottom
+   ============================================================================ */
+.progress-indicator {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    background: var(--neu-bg);
+    border-radius: 0 0 var(--neu-radius) var(--neu-radius);
+    overflow: hidden;
+    z-index: 4;
+    box-shadow: var(--neu-in-sm);
+}
+
+.progress-indicator .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg,
+        var(--eval-primary) 0%,
+        var(--eval-info) 50%,
+        var(--eval-primary) 100%);
+    background-size: 200% 100%;
+    border-radius: 0 0 var(--neu-radius) var(--neu-radius);
+    animation: progress-bar var(--pipeline-progress-duration) ease-in-out infinite;
+}
+
+/* ============================================================================
+   KEYFRAMES — smooth, loop-friendly animations
+   ============================================================================ */
+
+/* Particle flow along path */
+@keyframes particle-flow {
+    0% {
+        offset-distance: 0%;
+        opacity: 0;
+        transform: scale(0.6);
+    }
+    10% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    85% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    100% {
+        offset-distance: 100%;
+        opacity: 0;
+        transform: scale(0.6);
+    }
+}
+
+/* Fallback for browsers without offset-path support */
+@keyframes particle-fallback {
+    0% {
+        opacity: 0;
+        transform: translate(0, 0) scale(0.6);
+    }
+    10% {
+        opacity: 1;
+        transform: translate(0, 0) scale(1);
+    }
+    90% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+        transform: translate(var(--particle-dx, 100px), var(--particle-dy, 0)) scale(0.6);
+    }
+}
+
+/* Active stage pulse glow */
+@keyframes stage-pulse {
+    0%, 100% {
+        box-shadow:
+            var(--neu-out-lg),
+            0 0 20px rgba(52, 152, 219, 0.45),
+            0 0 40px rgba(52, 152, 219, 0.2);
+    }
+    50% {
+        box-shadow:
+            var(--neu-out-lg),
+            0 0 30px rgba(52, 152, 219, 0.65),
+            0 0 55px rgba(52, 152, 219, 0.3);
+    }
+}
+
+/* Progress bar animation */
+@keyframes progress-bar {
+    0% {
+        width: 0%;
+        background-position: 0% 0%;
+    }
+    50% {
+        width: 75%;
+        background-position: 100% 0%;
+    }
+    100% {
+        width: 100%;
+        background-position: 200% 0%;
+    }
+}
+
+/* Connector glow pulse */
+@keyframes connector-glow {
+    0%, 100% {
+        filter: drop-shadow(0 0 4px rgba(52, 152, 219, 0.5));
+        stroke-opacity: 1;
+    }
+    50% {
+        filter: drop-shadow(0 0 10px rgba(52, 152, 219, 0.8));
+        stroke-opacity: 0.7;
+    }
+}
+
+/* ============================================================================
+   RESPONSIVE — smaller screens
+   ============================================================================ */
+@media (max-width: 768px) {
+    #pipeline-animation-container {
+        min-height: 420px;
+        padding: 1.25rem;
+    }
+
+    .pipeline-stage {
+        min-width: 80px;
+        min-height: 56px;
+        padding: 0.5rem 0.65rem;
+    }
+
+    .pipeline-stage .stage-icon {
+        font-size: 1.1rem;
+    }
+
+    .pipeline-stage .stage-label {
+        font-size: 0.7rem;
+    }
+
+    .pipeline-phase-card .phase-number {
+        width: 30px;
+        height: 30px;
+        font-size: 0.8rem;
+    }
+
+    .pipeline-phase-card .phase-formula {
+        font-size: 0.78rem;
+        padding: 0.5rem 0.75rem;
+    }
+
+    /* Allow stages to reflow on small screens */
+    #pipeline-animation-container.flow-wrap .pipeline-stage {
+        position: relative;
+        top: auto !important;
+        left: auto !important;
+        transform: none !important;
+    }
+
+    #pipeline-animation-container.flow-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+}
+
+@media (max-width: 576px) {
+    #pipeline-animation-container {
+        min-height: 360px;
+        padding: 1rem;
+    }
+
+    .pipeline-stage {
+        min-width: 64px;
+        min-height: 48px;
+        padding: 0.4rem 0.5rem;
+    }
+
+    .pipeline-stage .stage-label {
+        font-size: 0.65rem;
+    }
+
+    .data-particle {
+        --pipeline-particle-size: 9px;
+    }
+}
+
+/* ============================================================================
+   REDUCED MOTION — respect user preference
+   ============================================================================ */
+@media (prefers-reduced-motion: reduce) {
+    .pipeline-stage.active,
+    .data-particle.flow,
+    .pipeline-connector.active .connector-line,
+    .progress-indicator .progress-fill {
+        animation: none;
+    }
+
+    .pipeline-stage.active {
+        box-shadow:
+            var(--neu-out-lg),
+            0 0 15px rgba(52, 152, 219, 0.35);
+    }
+
+    .progress-indicator .progress-fill {
+        width: 60%;
+    }
+}

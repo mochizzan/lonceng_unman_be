@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/eval/static/css/main.css">
+    <link rel="stylesheet" href="/eval/static/css/pipeline.css">
+</head>
+<body>
+    <div class="dashboard">
+        {{template "sidebar" .}}
+
+        <div class="dashboard-main">
+            {{template "header" .}}
+
+            <main class="dashboard-content bg-body-tertiary">
+                <!-- Judul Halaman -->
+                <div class="page-title">
+                    <h1><i class="bi bi-diagram-3 text-primary"></i> Pipeline Visualisasi Ekstraksi PDF</h1>
+                    <p class="text-body-secondary mb-0">Alur transformasi data dari PDF mentah menjadi structured JSON — KRS & KHS</p>
+                </div>
+
+                <!-- Tab Navigasi -->
+                <ul class="nav nav-tabs" id="pipelineTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="formulas-tab" data-bs-toggle="tab" data-bs-target="#formulas" type="button" role="tab" aria-controls="formulas" aria-selected="true">
+                            <i class="bi bi-calculator"></i> Rumus, Logika & Matematika
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="animation-tab" data-bs-toggle="tab" data-bs-target="#animation" type="button" role="tab" aria-controls="animation" aria-selected="false">
+                            <i class="bi bi-play-circle"></i> Simulasi Animasi Visual
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="pipelineTabContent">
+                    <!-- Tab 1: Rumus, Logika & Matematika -->
+                    <div class="tab-pane fade show active" id="formulas" role="tabpanel" aria-labelledby="formulas-tab">
+                        <div class="row g-3 mt-2">
+
+                            <!-- Fase 1: Pembacaan PDF -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-primary">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-file-earmark-pdf text-primary"></i> Fase 1 — Pembacaan PDF</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Fungsi:</strong> <code>ReadPDFWithPosition()</code> di <code>pdf_reader.go</code></p>
+                                        <p>Mengekstrak span teks dengan posisi X,Y dari setiap halaman dokumen PDF.</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// ReadPDFWithPosition mengekstrak teks dengan metadata posisi
+func ReadPDFWithPosition(ctx context.Context, pdfPath string) ([]Page, error) {
+    // Untuk setiap halaman, ekstrak span dengan:
+    // - Text: konten string
+    // - X, Y: koordinat dari origin PDF (kiri bawah)
+    // - Width, Height: dimensi bounding box
+    return pages, nil
+}</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-primary bg-opacity-10 text-primary">Input: File PDF</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-primary bg-opacity-10 text-primary">[]Span{X, Y, Text}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 2: Transformasi Koordinat -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-success">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-arrow-down text-success"></i> Fase 2 — Transformasi Koordinat</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Kode:</strong> <code>flipY = pageHeight - span.Y</code> di <code>pdf_reader.go</code></p>
+                                        <p>Membalik sumbu Y dari origin PDF (kiri bawah) ke origin layar (kiri atas).</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// Sistem koordinat PDF memiliki origin di kiri bawah
+// Sistem koordinat layar memiliki origin di kiri atas
+// Transformasi: flipY = pageHeight - span.Y
+
+func flipYCoord(span Span, pageHeight float64) float64 {
+    return pageHeight - span.Y
+}</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-success bg-opacity-10 text-success">PDF Y (bawah)</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-success bg-opacity-10 text-success">Layar Y (atas)</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 3: Pengelompokan Baris -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-info">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-grid-3x3 text-info"></i> Fase 3 — Pengelompokan Baris</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Rumus:</strong> <code>roundY(y) = float64(int(y*4))/4.0</code> di <code>pdf_reader.go</code></p>
+                                        <p>Membulatkan Y ke 0.25 terdekat untuk mengelompokkan kata pada garis horizontal yang sama.</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// Kata pada baris yang sama memiliki nilai Y yang hampir sama
+// Pembulatan ke 0.25 terdekat menciptakan toleransi untuk ketidaksejajaran
+// Rumus: roundY(y) = float64(int(y*4)) / 4.0
+
+func roundY(y float64) float64 {
+    return float64(int(y*4)) / 4.0
+}
+
+// Contoh: 100.12 → 100.00, 100.37 → 100.25, 100.63 → 100.50</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-info bg-opacity-10 text-info">Nilai Y Mentah</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-info bg-opacity-10 text-info">Y Dibulatkan (langkah 0.25)</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-info bg-opacity-10 text-info">Baris Terkelompok</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 4: Konstruksi Baris -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-warning">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-layout-text-sidebar-reverse text-warning"></i> Fase 4 — Konstruksi Baris</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Fungsi:</strong> <code>RowToLine()</code> di <code>pdf_reader.go</code></p>
+                                        <p>Mengelompokkan kata berdasarkan posisi X; menggabungkan kata pada X yang sama tanpa spasi, kata pada X berbeda dengan spasi.</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// RowToLine mengelompokkan kata berdasarkan koordinat X
+// Kata yang berbagi X digabungkan tanpa spasi (token yang sama)
+// Kata pada X berbeda digabungkan dengan spasi (token terpisah)
+
+func RowToLine(spans []Span) string {
+    // Kelompokkan berdasarkan X, urutkan berdasarkan X, gabungkan
+    groups := groupByX(spans)
+    sortByX(groups)
+    return joinWithSpaces(groups)
+}
+
+// Input:  [{X:10,T:"IF"}, {X:10,T:"211"}, {X:50,T:"Algo"}]
+// Output: "IF211 Algo"</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-warning bg-opacity-10 text-warning">Word Spans</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-warning bg-opacity-10 text-warning">Token Terelompok X</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-warning bg-opacity-10 text-warning">Baris</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 5: Deteksi Kolom -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-danger">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-layout-columns text-danger"></i> Fase 5 — Deteksi Kolom</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Fungsi:</strong> <code>FindColumnPositions()</code> di <code>pdf_reader.go</code></p>
+                                        <p>Mengelompokkan kata header berdasarkan X, mencocokkan nama kolom yang diketahui, menghitung batas sebagai titik tengah antara posisi X yang berdekatan.</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// FindColumnPositions mengidentifikasi batas kolom
+// 1. Kelompokkan kata header berdasarkan koordinat X
+// 2. Cocokkan dengan nama kolom diketahui (NO, KODE, MATA KULIAH, dll.)
+// 3. Batas = titik tengah antara posisi X yang berdekatan
+
+func FindColumnPositions(headerRow []Span) []Column {
+    xPositions := uniqueX(headerRow)
+    sort.Float64s(xPositions)
+    // boundary[i] = (xPositions[i] + xPositions[i+1]) / 2
+    return computeBoundaries(xPositions)
+}
+
+// Contoh: X = [50, 120, 200] → batas = [85, 160]
+// Kolom 1: [0, 85), Kolom 2: [85, 160), Kolom 3: [160, ∞)</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-danger bg-opacity-10 text-danger">Baris Header</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-danger bg-opacity-10 text-danger">Posisi X Kolom</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-danger bg-opacity-10 text-danger">Rentang Batas</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 6: Ekstraksi Kolom -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-primary">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-text-paragraph text-primary"></i> Fase 6 — Ekstraksi Kolom</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Fungsi:</strong> <code>ExtractColumnsFromRow()</code> di <code>pdf_reader.go</code></p>
+                                        <p>Mengambil kata yang X-nya berada dalam rentang [Start, End) untuk setiap kolom.</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// ExtractColumnsFromRow menetapkan setiap kata ke kolom
+// berdasarkan apakah word.X berada dalam rentang [Start, End) kolom
+
+func ExtractColumnsFromRow(row Row, cols []Column) map[string]string {
+    result := make(map[string]string)
+    for _, col := range cols {
+        words := filterWords(row, func(w Span) bool {
+            return w.X &gt;= col.Start &amp;&amp; w.X &lt; col.End
+        })
+        result[col.Name] = joinWords(words)
+    }
+    return result
+}
+
+// Baris: kata pada X=10,30,55,90,150
+// Kolom: [0,40)=NO, [40,100)=KODE, [100,∞)=NAMA
+// Hasil: NO={10,30}, KODE={55,90}, NAMA={150}</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-primary bg-opacity-10 text-primary">Baris + Batas</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-primary bg-opacity-10 text-primary">Kata per Kolom</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-primary bg-opacity-10 text-primary">map[col]nilai</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 7: Pintar Kata Split -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-success">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-magic text-success"></i> Fase 7 — Pintar Kata Split</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Fungsi:</strong> <code>SmartWordSplit()</code> di <code>pdf_reader.go</code></p>
+                                        <p>Memisahkan kata yang digabungkan menggunakan deteksi CamelCase, batas digit, dan deteksi singkatan (2+ huruf kapital).</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// SmartWordSplit memisahkan token yang digabungkan menjadi kata
+// Aturan:
+// 1. CamelCase: batas lower→upper memisahkan ("IF211Algo" → "IF211" "Algo")
+// 2. Batas digit: letter→digit atau digit→letter
+// 3. Singkatan: 2+ huruf kapital berurutan tetap bersama
+
+func SmartWordSplit(token string) []string {
+    var words []string
+    // Pindai karakter, deteksi batas:
+    // - Transisi kasus: 'a' → 'A' → pisah
+    // - Transisi digit: 'A' → '2' → pisah
+    // - Singkatan: "IF" tetap, "IF211" pisah di digit
+    return words
+}
+
+// "IF211Pemrograman" → ["IF211", "Pemrograman"]
+// "SISTEMINFORMASI" → ["SISTEM", "INFORMASI"]</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-success bg-opacity-10 text-success">Token Digabung</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-success bg-opacity-10 text-success">CamelCase + Digit</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-success bg-opacity-10 text-success">Kata Terpisah</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 8: Parsing KRS -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-info">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-journal-text text-info"></i> Fase 8 — Parsing KRS</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Fungsi:</strong> <code>parseKRSMataKuliah()</code> di <code>krs_parser.go</code></p>
+                                        <p>Memindai SEMUA baris, menduplikasi dengan kunci <code>kode:kelas</code>, mengekstrak jadwal dari kolom JADWAL.</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// parseKRSMataKuliah memproses baris dokumen KRS
+// - Iterasi SEMUA baris dalam dokumen
+// - Menduplikasi dengan kunci komposit: kode + ":" + kelas
+// - Mengekstrak info jadwal dari kolom JADWAL
+
+func parseKRSMataKuliah(rows []Row) []MataKuliah {
+    seen := make(map[string]bool)
+    var courses []MataKuliah
+    for _, row := range rows {
+        mk := extractMK(row)
+        key := mk.Kode + ":" + mk.Kelas
+        if !seen[key] {
+            seen[key] = true
+            mk.Jadwal = parseJadwal(row["JADWAL"])
+            courses = append(courses, mk)
+        }
+    }
+    return courses
+}</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-info bg-opacity-10 text-info">Semua Baris</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-info bg-opacity-10 text-info">Dedup kode:kelas</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-info bg-opacity-10 text-info">Mata Kuliah KRS</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 9: Parsing KHS -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-warning">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-journal-check text-warning"></i> Fase 9 — Parsing KHS</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Fungsi:</strong> <code>parseKHSMataKuliah()</code> di <code>khs_parser.go</code></p>
+                                        <p>Menangani entri multi-baris: baris nama sebelumnya, data mata kuliah, baris dosen setelahnya. Menduplikasi dengan <code>no</code> (nomor baris).</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// parseKHSMataKuliah memproses dokumen KHS dengan entri multi-baris
+// Pola: [baris NAMA] → [baris data mata kuliah] → [baris DOSEN]
+// Kunci deduplikasi: no (nomor urut baris)
+
+func parseKHSMataKuliah(rows []Row) []MKHasilStudi {
+    seen := make(map[int]bool)
+    var results []MKHasilStudi
+    i := 0
+    for i &lt; len(rows) {
+        if isNamaRow(rows[i]) {
+            i++ // lewati nama
+            if i &lt; len(rows) {
+                mk := parseCourseRow(rows[i])
+                if !seen[mk.No] {
+                    seen[mk.No] = true
+                    results = append(results, mk)
+                }
+                i++ // lewati data
+            }
+            if i &lt; len(rows) &amp;&amp; isDosenRow(rows[i]) {
+                i++ // lewati dosen
+            }
+        } else {
+            i++
+        }
+    }
+    return results
+}</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-warning bg-opacity-10 text-warning">Entri Multi-Baris</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-warning bg-opacity-10 text-warning">Dedup no</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-warning bg-opacity-10 text-warning">Mata Kuliah KHS</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 10: Deduplikasi -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-danger">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-funnel text-danger"></i> Fase 10 — Deduplikasi</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Strategi:</strong> KRS dengan <code>kode:kelas</code>, KHS dengan <code>no</code></p>
+                                        <p>Mencegah entri mata kuliah duplikat ketika mata kuliah yang sama muncul beberapa kali dalam dokumen.</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// Deduplikasi mencegah entri mata kuliah duplikat
+// KRS: menduplikasi dengan kunci komposit kode:kelas
+// KHS: menduplikasi dengan nomor baris (no)
+
+// Deduplikasi KRS
+krsKey := course.Kode + ":" + course.Kelas
+// Contoh: "IF211:A", "IF211:B" → entri berbeda
+
+// Deduplikasi KHS
+khsKey := course.No  // nomor urut baris
+// Contoh: No=1, No=2 → entri berbeda
+
+// Keduanya menggunakan map[key]bool untuk melacak entri yang sudah dilihat
+seen := make(map[string]bool)
+if !seen[key] {
+    seen[key] = true
+    results = append(results, course)
+}</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-danger bg-opacity-10 text-danger">Mata Kuliah Mentah</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-danger bg-opacity-10 text-danger">Pengecekan Kunci Unik</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-danger bg-opacity-10 text-danger">Terdeduplikasi</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fase 11: Output JSON -->
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm border-start border-4 border-primary">
+                                    <div class="card-header bg-white">
+                                        <h5 class="mb-0"><i class="bi bi-file-earmark-code text-primary"></i> Fase 11 — Output JSON</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p><strong>Fungsi:</strong> <code>MarshalToJSON()</code></p>
+                                        <p>Serialisasi data mata kuliah terstruktur ke format JSON untuk respons API atau penyimpanan.</p>
+                                        <pre class="bg-dark text-light p-3 rounded"><code>// MarshalToJSON serialisasi data terstruktur ke JSON
+// Input: []MataKuliah atau []MKHasilStudi
+// Output: byte JSON dengan field tag yang sesuai
+
+func MarshalToJSON(data interface{}) ([]byte, error) {
+    return json.MarshalIndent(data, "", "  ")
+}
+
+// Contoh output:
+// {
+//   "krs": [
+//     {
+//       "no": 1,
+//       "kode": "IF211",
+//       "nama": "Algoritma",
+//       "kelas": "A",
+//       "sks": 3,
+//       "jadwal": "Senin 08:00"
+//     }
+//   ]
+// }</code></pre>
+                                        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                                            <span class="badge bg-primary bg-opacity-10 text-primary">Data Terstruktur</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-primary bg-opacity-10 text-primary">json.Marshal</span>
+                                            <i class="bi bi-arrow-right text-muted"></i>
+                                            <span class="badge bg-primary bg-opacity-10 text-primary">Output JSON</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Tab 2: Simulasi Animasi Visual -->
+                    <div class="tab-pane fade" id="animation" role="tabpanel" aria-labelledby="animation-tab">
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <div class="card border-0 shadow-sm">
+                                    <div class="card-header bg-dark text-white">
+                                        <h5 class="mb-0"><i class="bi bi-play-circle"></i> Animasi Pipeline — Loop Berkelanjut</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="pipeline-animation-container">
+                                            <!-- Stage 1: PDF Reading -->
+                                            <div class="pipeline-stage" id="stage-1" style="left: 2%; top: 10%;">
+                                                <i class="stage-icon bi bi-file-earmark-pdf"></i>
+                                                <span class="stage-label">PDF Read</span>
+                                            </div>
+                                            <!-- Stage 2: Coordinate Transform -->
+                                            <div class="pipeline-stage" id="stage-2" style="left: 12%; top: 10%;">
+                                                <i class="stage-icon bi bi-arrow-down"></i>
+                                                <span class="stage-label">Flip Y</span>
+                                            </div>
+                                            <!-- Stage 3: Row Grouping -->
+                                            <div class="pipeline-stage" id="stage-3" style="left: 22%; top: 10%;">
+                                                <i class="stage-icon bi bi-grid-3x3"></i>
+                                                <span class="stage-label">Group Y</span>
+                                            </div>
+                                            <!-- Stage 4: Row Construction -->
+                                            <div class="pipeline-stage" id="stage-4" style="left: 32%; top: 10%;">
+                                                <i class="stage-icon bi bi-layout-text-sidebar-reverse"></i>
+                                                <span class="stage-label">Row Line</span>
+                                            </div>
+                                            <!-- Stage 5: Column Detection -->
+                                            <div class="pipeline-stage" id="stage-5" style="left: 42%; top: 10%;">
+                                                <i class="stage-icon bi bi-layout-columns"></i>
+                                                <span class="stage-label">Columns</span>
+                                            </div>
+                                            <!-- Stage 6: Column Extraction -->
+                                            <div class="pipeline-stage" id="stage-6" style="left: 52%; top: 10%;">
+                                                <i class="stage-icon bi bi-text-paragraph"></i>
+                                                <span class="stage-label">Extract</span>
+                                            </div>
+                                            <!-- Stage 7: Smart Word Split -->
+                                            <div class="pipeline-stage" id="stage-7" style="left: 62%; top: 10%;">
+                                                <i class="stage-icon bi bi-magic"></i>
+                                                <span class="stage-label">Split</span>
+                                            </div>
+                                            <!-- Stage 8: KRS Parsing -->
+                                            <div class="pipeline-stage" id="stage-8" style="left: 72%; top: 10%;">
+                                                <i class="stage-icon bi bi-journal-text"></i>
+                                                <span class="stage-label">KRS</span>
+                                            </div>
+                                            <!-- Stage 9: KHS Parsing -->
+                                            <div class="pipeline-stage" id="stage-9" style="left: 82%; top: 10%;">
+                                                <i class="stage-icon bi bi-journal-check"></i>
+                                                <span class="stage-label">KHS</span>
+                                            </div>
+                                            <!-- Stage 10: Deduplication -->
+                                            <div class="pipeline-stage" id="stage-10" style="left: 2%; top: 55%;">
+                                                <i class="stage-icon bi bi-funnel"></i>
+                                                <span class="stage-label">Dedup</span>
+                                            </div>
+                                            <!-- Stage 11: JSON Output -->
+                                            <div class="pipeline-stage" id="stage-11" style="left: 12%; top: 55%;">
+                                                <i class="stage-icon bi bi-file-earmark-code"></i>
+                                                <span class="stage-label">JSON</span>
+                                            </div>
+
+                                            <!-- Data particles layer -->
+                                            <div id="particles-container"></div>
+
+                                            <!-- Progress indicator -->
+                                            <div class="progress-indicator">
+                                                <div class="progress-fill" id="pipelineProgressBar" style="width: 0%;"></div>
+                                            </div>
+
+                                            <!-- Current stage info -->
+                                            <div id="pipeline-info" style="position:absolute; left:25%; top:55%; width:60%; text-align:center;">
+                                                <div id="stageCounter" class="small text-muted mb-1">Stage 1 / 11</div>
+                                                <div id="currentStageLabel" class="fw-bold" style="font-size:1.1rem;">PDF Reading</div>
+                                                <div id="stageDescription" class="small text-body-secondary">Mengekstrak span teks dengan posisi X,Y dari PDF</div>
+                                            </div>
+
+                                            <!-- Completion flash label -->
+                                            <div id="completionLabel" style="position:absolute; left:25%; top:30%; width:60%; text-align:center; opacity:0; transition:opacity 0.4s;">
+                                                <div class="fs-3 fw-bold text-success"><i class="bi bi-check-circle-fill"></i> Siklus Selesai</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <script type="module" src="/eval/static/js/pipeline.js"></script>
+            </main>
+        </div>
+    </div>
+
+    <!-- Mobile sidebar backdrop -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+    {{template "scripts" .}}
+</body>
+</html>

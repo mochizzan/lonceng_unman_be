@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/eval/static/css/main.css">
+</head>
+<body>
+    <div class="dashboard">
+        {{template "sidebar" .}}
+
+        <div class="dashboard-main">
+            {{template "header" .}}
+
+            <main class="dashboard-content bg-body-tertiary">
+                <!-- Page Title -->
+                <div class="page-title">
+                    <h1><i class="bi bi-people text-primary"></i> Data Mahasiswa</h1>
+                    <p class="text-body-secondary mb-0">Daftar mahasiswa yang telah dievaluasi</p>
+                </div>
+
+                <!-- Search and Pagination Controls -->
+                <div class="card card-interactive border-0 shadow-sm mb-4">
+                    <div class="card-body">
+                        <div class="row g-2 align-items-center">
+                            <div class="col-auto">
+                                <label class="col-form-label text-body-secondary"><i class="bi bi-search"></i> Cari:</label>
+                            </div>
+                            <div class="col-md-4">
+                                <input type="text" class="form-control form-control-sm" id="searchInput" placeholder="NPM atau Nama...">
+                            </div>
+                            <div class="col-auto ms-auto">
+                                <label class="col-form-label text-body-secondary"><i class="bi bi-list-ol"></i> Tampilkan:</label>
+                            </div>
+                            <div class="col-auto">
+                                <select class="form-select form-select-sm" id="perPageSelect" style="width: auto;">
+                                    <option value="25" selected>25</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Student List Container -->
+                <div id="studentListContainer">
+                    <div class="text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Memuat...</span>
+                        </div>
+                        <p class="text-body-secondary mt-3">Memuat data mahasiswa...</p>
+                    </div>
+                </div>
+
+                <!-- Pagination Navigation -->
+                <nav aria-label="Navigasi halaman mahasiswa" class="mt-4">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <!-- Page Info -->
+                        <p class="text-body-secondary mb-0" id="pageInfo">
+                            Menampilkan <span id="showingStart">0</span> - <span id="showingEnd">0</span> dari <span id="totalRecords">0</span> mahasiswa
+                        </p>
+                        <!-- Bootstrap 5 Pagination -->
+                        <ul class="pagination pagination-sm justify-content-center mb-0" id="paginationControls">
+                            <!-- Previous Button -->
+                            <li class="page-item disabled" id="prevPageItem">
+                                <a class="page-link" href="#" aria-label="Sebelumnya" id="prevPageLink">
+                                    <span aria-hidden="true">&laquo;</span>
+                                </a>
+                            </li>
+                            <!-- Page Numbers (dynamically generated) -->
+                            <li class="page-item active" aria-current="page">
+                                <a class="page-link" href="#">1</a>
+                            </li>
+                            <!-- Next Button -->
+                            <li class="page-item" id="nextPageItem">
+                                <a class="page-link" href="#" aria-label="Selanjutnya" id="nextPageLink">
+                                    <span aria-hidden="true">&raquo;</span>
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </nav>
+
+                <script type="module" src="/eval/static/js/student.js"></script>
+            </main>
+        </div>
+    </div>
+
+    <!-- Mobile sidebar backdrop -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+    {{template "scripts" .}}
+</body>
+</html>

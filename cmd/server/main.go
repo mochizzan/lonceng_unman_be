@@ -66,11 +66,17 @@ func main() {
 	// Wire eval store, service, and handlers
 	evalStore := evalstore.New(cfg.App.EvalDir, cfg.App.ExtractDir, cfg.App.DownloadDir)
 	evalService := service.NewEvalService(evalStore)
-	evalHandler, err := handler.NewEvalHandler(evalService, cfg.App.EvalDir, cfg.App.DownloadDir, parser)
+	evalHandler, err := handler.NewEvalHandler(evalService, cfg.App.EvalDir, cfg.App.ExtractDir, cfg.App.DownloadDir, parser)
 	if err != nil {
 		panic("failed to create eval handler: " + err.Error())
 	}
 	evalGTHandler := handler.NewEvalGTHandler(evalService)
+
+	// Wire auth handler
+	authHandler, err := handler.NewAuthHandler(cfg)
+	if err != nil {
+		panic("failed to create auth handler: " + err.Error())
+	}
 
 	// Wire HTTP handlers
 	healthHandler := handler.NewHealthHandler(healthService)
@@ -79,7 +85,7 @@ func main() {
 	extractionHandler := handler.NewExtractionHandler(extractionService)
 
 	// Register routes
-	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler, studentProfileHandler, evalHandler, evalGTHandler)
+	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler, studentProfileHandler, evalHandler, evalGTHandler, authHandler, cfg)
 
 	// Start server
 	log.Info(

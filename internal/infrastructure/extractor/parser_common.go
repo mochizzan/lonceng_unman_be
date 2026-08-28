@@ -74,19 +74,53 @@ func NormalizeLabel(s string) string {
 	return result.String()
 }
 
-// splitTahunAjaran splits "2025/2026" into Awal/Akhir.
+// splitTahunAjaran splits a year range into Awal/Akhir.
+// Handles both slash-separated ("2025/2026") and underscore-separated ("2020_2021") formats.
+// The underscore format comes from KHS filenames like "2020_2021_GENAP.json".
 func splitTahunAjaran(ta string) entity.TahunAjaran {
 	if ta == "" {
 		return entity.TahunAjaran{}
 	}
-	parts := strings.SplitN(ta, "/", 2)
-	if len(parts) == 2 {
-		return entity.TahunAjaran{
-			Awal:  strings.TrimSpace(parts[0]),
-			Akhir: strings.TrimSpace(parts[1]),
+
+	// Try slash separator first (e.g., "2025/2026")
+	if strings.Contains(ta, "/") {
+		parts := strings.SplitN(ta, "/", 2)
+		if len(parts) == 2 {
+			return entity.TahunAjaran{
+				Awal:  strings.TrimSpace(parts[0]),
+				Akhir: strings.TrimSpace(parts[1]),
+			}
 		}
 	}
+
+	// Try underscore separator (e.g., "2020_2021" from filename "2020_2021_GENAP.json")
+	// Only split if the string looks like two 4-digit years separated by underscore
+	if strings.Contains(ta, "_") {
+		parts := strings.SplitN(ta, "_", 2)
+		if len(parts) == 2 {
+			awal := strings.TrimSpace(parts[0])
+			akhir := strings.TrimSpace(parts[1])
+			// Validate both parts look like years (4 digits each)
+			if len(awal) == 4 && len(akhir) == 4 && isAllDigits(awal) && isAllDigits(akhir) {
+				return entity.TahunAjaran{
+					Awal:  awal,
+					Akhir: akhir,
+				}
+			}
+		}
+	}
+
 	return entity.TahunAjaran{Awal: ta}
+}
+
+// isAllDigits checks if a string contains only digit characters.
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 // parseHeaderFields extracts label-value pairs from plain text lines.

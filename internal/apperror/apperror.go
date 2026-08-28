@@ -81,6 +81,22 @@ func Forbidden(msg string) *AppError {
 	}
 }
 
+// Conflict creates a 409 error.
+func Conflict(msg string) *AppError {
+	return &AppError{
+		StatusCode: fiber.StatusConflict,
+		PublicMsg:  msg,
+	}
+}
+
+// TooManyRequests creates a 429 error.
+func TooManyRequests(msg string) *AppError {
+	return &AppError{
+		StatusCode: fiber.StatusTooManyRequests,
+		PublicMsg:  msg,
+	}
+}
+
 // Internal creates a 500 error with an internal cause that is logged but not exposed.
 func Internal(msg string, internal error) *AppError {
 	return &AppError{

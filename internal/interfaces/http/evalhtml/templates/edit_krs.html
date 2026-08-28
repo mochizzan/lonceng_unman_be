@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/eval/static/css/main.css">
+</head>
+<body>
+    <div class="dashboard">
+        {{template "sidebar" .}}
+
+        <div class="dashboard-main">
+            {{template "header" .}}
+
+            <main class="dashboard-content bg-body-tertiary">
+                <!-- Page Title -->
+                <div class="page-title">
+                    <h1><i class="bi bi-pencil-square text-primary"></i> Edit Ground Truth KRS</h1>
+                    <p class="text-body-secondary mb-0">Edit data Ground Truth untuk dokumen KRS mahasiswa</p>
+                </div>
+
+                <div class="row g-3">
+                    <!-- LEFT: Form Editor -->
+                    <div class="col-lg-6">
+                        <div class="card card-interactive border-0 shadow-sm">
+                            <div class="card-header bg-white border-bottom">
+                                <h5 class="mb-0 fw-semibold"><i class="bi bi-pencil"></i> Form Editor</h5>
+                            </div>
+                            <div class="card-body">
+                                <form id="gtForm" data-file="{{.File}}" data-npm="{{.NPM}}">
+                                    <!-- Header Section -->
+                                    <h6 class="text-uppercase text-body-secondary mb-3 fw-semibold"><i class="bi bi-person-vcard"></i> Header</h6>
+
+                                    <div class="row g-2 mb-3">
+                                        <label class="col-sm-4 col-form-label fw-semibold">NPM</label>
+                                        <div class="col-sm-8">
+                                            <input type="text" class="form-control form-control-sm" name="npm" value="{{.NPM}}" readonly>
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <label class="col-sm-4 col-form-label fw-semibold">Nama</label>
+                                        <div class="col-sm-8">
+                                            <input type="text" class="form-control form-control-sm" name="nama" value="{{.GT.krs.mahasiswa.nama}}">
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <label class="col-sm-4 col-form-label fw-semibold">Program Studi</label>
+                                        <div class="col-sm-8">
+                                            <input type="text" class="form-control form-control-sm" name="program_studi" value="{{.GT.krs.mahasiswa.program_studi}}">
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <label class="col-sm-4 col-form-label fw-semibold">Semester</label>
+                                        <div class="col-sm-8">
+                                            <input type="text" class="form-control form-control-sm" name="semester" value="{{.GT.krs.periode.semester}}">
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <label class="col-sm-4 col-form-label fw-semibold">Tahun Ajaran Awal</label>
+                                        <div class="col-sm-8">
+                                            <input type="text" class="form-control form-control-sm" name="tahun_awal" value="{{.GT.krs.periode.tahun_ajaran.awal}}">
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <label class="col-sm-4 col-form-label fw-semibold">Tahun Ajaran Akhir</label>
+                                        <div class="col-sm-8">
+                                            <input type="text" class="form-control form-control-sm" name="tahun_akhir" value="{{.GT.krs.periode.tahun_ajaran.akhir}}">
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <label class="col-sm-4 col-form-label fw-semibold">Total SKS</label>
+                                        <div class="col-sm-8">
+                                            <input type="number" class="form-control form-control-sm" name="total_sks" value="{{.GT.krs.total_sks}}">
+                                        </div>
+                                    </div>
+
+                                    <hr>
+
+                                    <!-- Mata Kuliah Section -->
+                                    <h6 class="text-uppercase text-body-secondary mb-3 fw-semibold"><i class="bi bi-book"></i> Mata Kuliah</h6>
+
+                                    <div class="table-responsive">
+                                        <table class="table table-hover table-striped table-sm align-middle" id="mkTable">
+                                            <thead class="table-dark">
+                                                <tr>
+                                                    <th style="width:50px">No</th>
+                                                    <th>Kode</th>
+                                                    <th>Nama</th>
+                                                    <th style="width:70px">SKS</th>
+                                                    <th>Kelas</th>
+                                                    <th>Dosen</th>
+                                                    <th>Hari</th>
+                                                    <th>Mulai</th>
+                                                    <th>Selesai</th>
+                                                    <th style="width:60px">Aksi</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {{range .GT.krs.mata_kuliah}}
+                                                <tr>
+                                                    <td><input type="number" class="form-control form-control-sm" name="no" value="{{.no}}"></td>
+                                                    <td><input type="text" class="form-control form-control-sm" name="kode" value="{{.kode}}"></td>
+                                                    <td><input type="text" class="form-control form-control-sm" name="nama" value="{{.nama}}"></td>
+                                                    <td><input type="number" class="form-control form-control-sm" name="sks" value="{{.sks}}"></td>
+                                                    <td><input type="text" class="form-control form-control-sm" name="kelas" value="{{.kelas}}"></td>
+                                                    <td><input type="text" class="form-control form-control-sm" name="dosen" value="{{.dosen}}"></td>
+                                                    <td><input type="text" class="form-control form-control-sm" name="hari" value="{{.jadwal.hari}}"></td>
+                                                    <td><input type="text" class="form-control form-control-sm" name="waktu_mulai" value="{{.jadwal.waktu_mulai}}"></td>
+                                                    <td><input type="text" class="form-control form-control-sm" name="waktu_selesai" value="{{.jadwal.waktu_selesai}}"></td>
+                                                    <td><button type="button" class="btn btn-sm btn-outline-danger row-remove"><i class="bi bi-trash"></i></button></td>
+                                                </tr>
+                                                {{end}}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-success add-row"><i class="bi bi-plus-lg"></i> Tambah MK</button>
+
+                                    <hr>
+
+                                    {{if .GTExists}}
+                                    <div class="form-check mt-3">
+                                        <input class="form-check-input" type="checkbox" name="confirm_overwrite" value="true" id="confirmOverwrite">
+                                        <label class="form-check-label" for="confirmOverwrite">Timpa GT yang ada</label>
+                                    </div>
+                                    {{end}}
+
+                                    <div class="d-flex gap-2 mt-3">
+                                        <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Simpan</button>
+                                        <button type="button" class="btn btn-outline-info" id="autoExtractBtn"><i class="bi bi-magic"></i> Isi Otomatis dari PDF</button>
+                                        <span id="autoExtractStatus" class="ms-2 align-self-center small"></span>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT: PDF Preview -->
+                    <div class="col-lg-6">
+                        <div class="card card-interactive border-0 shadow-sm">
+                            <div class="card-header bg-white border-bottom">
+                                <h5 class="mb-0 fw-semibold"><i class="bi bi-file-earmark-pdf"></i> Pratinjau PDF</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-body-secondary small">
+                                        <i class="bi bi-person"></i> <strong>{{.NPM}}</strong>
+                                    </span>
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-file-earmark"></i> {{.File}}</span>
+                                </div>
+
+                                <!-- Zoom Toolbar -->
+                                <div class="d-flex gap-2 mb-2 align-items-center">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary zoom-in"><i class="bi bi-zoom-in"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary zoom-out"><i class="bi bi-zoom-out"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary zoom-reset"><i class="bi bi-arrow-clockwise"></i></button>
+                                    <span class="ms-auto badge bg-light text-dark" id="zoomLevel">100%</span>
+                                </div>
+
+                                <!-- Preview Container -->
+                                <div id="previewContainer" class="border rounded">
+                                    {{if .RawPDFBase64}}
+                                    <iframe id="pdfFrame" src="data:application/pdf;base64,{{.RawPDFBase64}}#zoom=100" width="100%" height="600px"></iframe>
+                                    {{else}}
+                                    <div class="text-center py-5 bg-body-tertiary rounded">
+                                        <i class="bi bi-file-earmark-x display-3 text-body-secondary"></i>
+                                        <p class="text-body-secondary mt-3"><strong>Pratinjau PDF tidak tersedia.</strong></p>
+                                        <p class="text-body-tertiary small">{{.PDFInfo.Reason}}</p>
+                                        <details class="mt-2">
+                                            <summary class="btn btn-sm btn-link">Detail diagnostik</summary>
+                                            <div class="text-start p-3">
+                                                <p>Kode: <code>{{.PDFInfo.ReasonCode}}</code></p>
+                                                <p>Path yang diperiksa:</p>
+                                                <ul class="small">
+                                                {{range .PDFInfo.TriedPaths}}
+                                                    <li><code>{{.}}</code></li>
+                                                {{else}}
+                                                    <li><em>Tidak ada path yang diperiksa.</em></li>
+                                                {{end}}
+                                                </ul>
+                                            </div>
+                                        </details>
+                                    </div>
+                                    {{end}}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <script type="module" src="/eval/static/js/edit-krs.js"></script>
+            </main>
+        </div>
+    </div>
+
+    <!-- Mobile sidebar backdrop -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+    {{template "scripts" .}}
+</body>
+</html>

@@ -1,0 +1,95 @@
+{{define "sidebar"}}
+<aside class="dashboard-sidebar bg-white text-dark border-end d-flex flex-column" id="sidebar">
+    <div class="sidebar-header px-3 py-2 border-bottom d-flex align-items-center">
+        <i class="bi bi-graph-up text-primary"></i>
+        <span class="sidebar-text ms-2 fw-semibold">Evaluasi</span>
+    </div>
+    <nav class="nav flex-column flex-grow-1 p-2">
+        <a class="nav-link {{if eq .ActivePage "index"}}active{{end}}" href="/eval">
+            <i class="bi bi-speedometer2"></i>
+            <span class="sidebar-text ms-2">Dashboard</span>
+        </a>
+        <a class="nav-link {{if eq .ActivePage "student"}}active{{end}}" href="/eval/student">
+            <i class="bi bi-person"></i>
+            <span class="sidebar-text ms-2">Mahasiswa</span>
+        </a>
+        <a class="nav-link {{if eq .ActivePage "krs"}}active{{end}}" href="/eval/krs">
+            <i class="bi bi-journal-text"></i>
+            <span class="sidebar-text ms-2">KRS</span>
+        </a>
+        <a class="nav-link {{if eq .ActivePage "khs"}}active{{end}}" href="/eval/khs">
+            <i class="bi bi-journal-check"></i>
+            <span class="sidebar-text ms-2">KHS</span>
+        </a>
+        <a class="nav-link {{if eq .ActivePage "pipeline"}}active{{end}}" href="/eval/pipeline">
+            <i class="bi bi-diagram-3"></i>
+            <span class="sidebar-text ms-2">Pipeline Visualisasi</span>
+        </a>
+    </nav>
+    <div class="px-3 py-2 border-top sidebar-footer">
+        <small class="text-muted"><i class="bi bi-info-circle"></i><span class="sidebar-text ms-1">Lonceng UnMan Confusion Matrix v1.0</span></small>
+    </div>
+</aside>
+{{end}}
+
+{{define "header"}}
+<nav class="navbar navbar-expand-lg bg-white border-bottom px-3 py-2">
+    <button class="btn btn-outline-secondary" id="sidebarToggle" type="button" aria-label="Toggle sidebar">
+        <i class="bi bi-list"></i>
+    </button>
+    <nav aria-label="breadcrumb" class="flex-grow-1 ms-2">
+        <ol class="breadcrumb mb-0">
+            {{range $i, $b := .Breadcrumbs}}
+            {{if $b.URL}}
+            <li class="breadcrumb-item"><a href="{{$b.URL}}" class="text-decoration-none text-body-secondary hover-text-primary">{{$b.Label}}</a></li>
+            {{else}}
+            <li class="breadcrumb-item active" aria-current="page">{{$b.Label}}</li>
+            {{end}}
+            {{end}}
+        </ol>
+    </nav>
+    <div>
+        <a href="javascript:location.reload()" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </a>
+    </div>
+</nav>
+{{end}}
+
+{{define "scripts"}}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
+<script>
+    (function() {
+        var sidebar = document.getElementById('sidebar');
+        var backdrop = document.getElementById('sidebarBackdrop');
+        var toggle = document.getElementById('sidebarToggle');
+
+        function isMobile() {
+            return window.innerWidth <= 768;
+        }
+
+        toggle?.addEventListener('click', function() {
+            if (isMobile()) {
+                sidebar.classList.toggle('open');
+                backdrop?.classList.toggle('show');
+            } else {
+                sidebar.classList.toggle('collapsed');
+            }
+        });
+
+        backdrop?.addEventListener('click', function() {
+            sidebar.classList.remove('open');
+            backdrop.classList.remove('show');
+        });
+
+        // Reset state on resize
+        window.addEventListener('resize', function() {
+            if (!isMobile()) {
+                sidebar.classList.remove('open');
+                backdrop?.classList.remove('show');
+            }
+        });
+    })();
+</script>
+{{end}}

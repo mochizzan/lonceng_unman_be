@@ -117,3 +117,9 @@ temp/
 *.tmp
 *.bak
 AGENTS.md
+raw/
+.plans/
+.planning
+.codebase-index
+eval
+.omp

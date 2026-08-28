@@ -203,6 +203,7 @@ func (s *EvalService) Student(npm string) (entity.StudentEval, error) {
 			Paired:     doc.Paired,
 			HasGT:      doc.HasGT,
 			HasExtract: doc.HasExtract,
+			HasRaw:     doc.HasRaw,
 		}
 
 		if doc.DocType == "krs" {

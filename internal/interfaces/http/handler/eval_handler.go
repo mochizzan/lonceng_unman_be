@@ -32,10 +32,11 @@ type EvalHandler struct {
 		Student(npm string) (entity.StudentEval, error)
 		LoadGT(npm, docType, filename string) ([]byte, error)
 	}
-	evalDir   string
-	pdfDir    string
-	templates *template.Template
-	parser    port.PDFParser
+	evalDir    string
+	extractDir string
+	pdfDir     string
+	templates  *template.Template
+	parser     port.PDFParser
 }
 
 // NewEvalHandler creates a new eval handler.
@@ -43,18 +44,19 @@ func NewEvalHandler(evalSvc interface {
 	Index() (entity.UnifiedEval, error)
 	Student(npm string) (entity.StudentEval, error)
 	LoadGT(npm, docType, filename string) ([]byte, error)
-}, evalDir, pdfDir string, parser port.PDFParser,
+}, evalDir, extractDir, pdfDir string, parser port.PDFParser,
 ) (*EvalHandler, error) {
 	tmpl, err := template.ParseFS(evalhtml.TemplatesFS, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
 	return &EvalHandler{
-		evalSvc:   evalSvc,
-		evalDir:   evalDir,
-		pdfDir:    pdfDir,
-		templates: tmpl,
-		parser:    parser,
+		evalSvc:    evalSvc,
+		evalDir:    evalDir,
+		extractDir: extractDir,
+		pdfDir:     pdfDir,
+		templates:  tmpl,
+		parser:     parser,
 	}, nil
 }
 
@@ -257,6 +259,21 @@ func (h *EvalHandler) KHSPage(c fiber.Ctx) error {
 	return h.templates.ExecuteTemplate(c.Response().BodyWriter(), "khs.html", dashData)
 }
 
+// PipelinePage handles GET /eval/pipeline — pipeline visualization page.
+func (h *EvalHandler) PipelinePage(c fiber.Ctx) error {
+	dashData := map[string]interface{}{
+		"Title":      "Pipeline Visualisasi Ekstraksi PDF",
+		"ActivePage": "pipeline",
+		"Breadcrumbs": []Breadcrumb{
+			{Label: "Dashboard", URL: "/eval"},
+			{Label: "Pipeline Visualisasi"},
+		},
+	}
+
+	c.Set("Content-Type", "text/html")
+	return h.templates.ExecuteTemplate(c.Response().BodyWriter(), "pipeline.html", dashData)
+}
+
 // EditKRS handles GET /eval/:npm/krs/:file/edit.
 func (h *EvalHandler) EditKRS(c fiber.Ctx) error {
 	npm := c.Params("npm")
@@ -388,6 +405,195 @@ func (h *EvalHandler) AutoExtractKHS(c fiber.Ctx) error {
 	}
 
 	return response.Success(c, fiber.StatusOK, result, "KHS auto-extracted successfully")
+}
+
+// ExtractionStatusKRS handles GET /api/v1/eval/:npm/krs/:file/extraction-status.
+// Returns JSON indicating whether the PDF exists and extraction has been performed.
+// IMPORTANT: Checks extractDir (NOT evalDir) for already_extracted — evalDir contains GT files.
+func (h *EvalHandler) ExtractionStatusKRS(c fiber.Ctx) error {
+	npm := c.Params("npm")
+	file := c.Params("file")
+
+	if err := validateNPM(npm); err != nil {
+		return err
+	}
+
+	pdfExists := false
+	if h.pdfDir != "" {
+		baseName := strings.TrimSuffix(file, ".json")
+		pdfName := baseName + ".pdf"
+		candidate := filepath.Join(h.pdfDir, npm, "krs", pdfName)
+		if _, err := os.Stat(candidate); err == nil {
+			pdfExists = true
+		}
+	}
+
+	// BUG FIX: Check extractDir for extracted files, NOT evalDir (which contains GT files)
+	extractExists := false
+	if h.extractDir != "" {
+		candidate := filepath.Join(h.extractDir, npm, "krs", file)
+		if _, err := os.Stat(candidate); err == nil {
+			extractExists = true
+		}
+	}
+
+	return response.Success(c, fiber.StatusOK, map[string]interface{}{
+		"pdf_exists":        pdfExists,
+		"already_extracted": extractExists,
+		"can_extract":       pdfExists && !extractExists,
+	}, "Extraction status retrieved")
+}
+
+// ExtractionStatusKHS handles GET /api/v1/eval/:npm/khs/:file/extraction-status.
+// Returns JSON indicating whether the PDF exists and extraction has been performed.
+// IMPORTANT: Checks extractDir (NOT evalDir) for already_extracted — evalDir contains GT files.
+func (h *EvalHandler) ExtractionStatusKHS(c fiber.Ctx) error {
+	npm := c.Params("npm")
+	file := c.Params("file")
+
+	if err := validateNPM(npm); err != nil {
+		return err
+	}
+
+	pdfExists := false
+	if h.pdfDir != "" {
+		baseName := strings.TrimSuffix(file, ".json")
+		pdfName := baseName + ".pdf"
+		candidate := filepath.Join(h.pdfDir, npm, "khs", pdfName)
+		if _, err := os.Stat(candidate); err == nil {
+			pdfExists = true
+		}
+	}
+
+	// BUG FIX: Check extractDir for extracted files, NOT evalDir (which contains GT files)
+	extractExists := false
+	if h.extractDir != "" {
+		candidate := filepath.Join(h.extractDir, npm, "khs", file)
+		if _, err := os.Stat(candidate); err == nil {
+			extractExists = true
+		}
+	}
+
+	return response.Success(c, fiber.StatusOK, map[string]interface{}{
+		"pdf_exists":        pdfExists,
+		"already_extracted": extractExists,
+		"can_extract":       pdfExists && !extractExists,
+	}, "Extraction status retrieved")
+}
+
+// ExtractAndSaveKRS handles POST /api/v1/eval/:npm/krs/:file/extract-and-save.
+// Parses the KRS PDF and persists the result to extractDir so it survives page refresh.
+func (h *EvalHandler) ExtractAndSaveKRS(c fiber.Ctx) error {
+	npm := c.Params("npm")
+	file := c.Params("file")
+
+	if err := validateNPM(npm); err != nil {
+		return err
+	}
+
+	pdfPath, err := h.findKRSFile(npm, file)
+	if err != nil {
+		if errors.Is(err, apperror.ErrPDFNotFound) {
+			return apperror.NotFound("KRS PDF not found for npm: "+npm, err)
+		}
+		return apperror.Internal("failed to find KRS PDF", err)
+	}
+
+	extraction, err := h.parser.ParseKRS(pdfPath, npm)
+	if err != nil {
+		return apperror.Internal("KRS extraction failed", err)
+	}
+
+	data, err := h.parser.MarshalToJSON(extraction)
+	if err != nil {
+		return apperror.Internal("failed to marshal extraction", err)
+	}
+
+	// Persist to extractDir
+	if h.extractDir != "" {
+		dir := filepath.Join(h.extractDir, npm, "krs")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return apperror.Internal("failed to create extract directory", err)
+		}
+		path := filepath.Join(dir, file)
+		tmpPath := path + ".tmp"
+		if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+			os.Remove(tmpPath)
+			return apperror.Internal("failed to write extraction", err)
+		}
+		if err := os.Rename(tmpPath, path); err != nil {
+			os.Remove(tmpPath)
+			return apperror.Internal("failed to finalize extraction", err)
+		}
+		slog.Info("KRS extraction saved", "npm", npm, "file", file, "path", path)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return apperror.Internal("failed to parse extraction", err)
+	}
+
+	return response.Success(c, fiber.StatusOK, result, "KRS extracted and saved successfully")
+}
+
+// ExtractAndSaveKHS handles POST /api/v1/eval/:npm/khs/:file/extract-and-save.
+// Parses the KHS PDF and persists the result to extractDir so it survives page refresh.
+func (h *EvalHandler) ExtractAndSaveKHS(c fiber.Ctx) error {
+	npm := c.Params("npm")
+	file := c.Params("file")
+
+	if err := validateNPM(npm); err != nil {
+		return err
+	}
+
+	tahunAjaran, semester, err := parseKHSFilename(file)
+	if err != nil {
+		return err
+	}
+
+	pdfPath, err := h.findKHSFile(npm, file)
+	if err != nil {
+		if errors.Is(err, apperror.ErrPDFNotFound) {
+			return apperror.NotFound("KHS PDF not found for npm: "+npm, err)
+		}
+		return apperror.Internal("failed to find KHS PDF", err)
+	}
+
+	extraction, err := h.parser.ParseKHS(pdfPath, npm, tahunAjaran, semester)
+	if err != nil {
+		return apperror.Internal("KHS extraction failed", err)
+	}
+
+	data, err := h.parser.MarshalToJSON(extraction)
+	if err != nil {
+		return apperror.Internal("failed to marshal extraction", err)
+	}
+
+	// Persist to extractDir
+	if h.extractDir != "" {
+		dir := filepath.Join(h.extractDir, npm, "khs")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return apperror.Internal("failed to create extract directory", err)
+		}
+		path := filepath.Join(dir, file)
+		tmpPath := path + ".tmp"
+		if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+			os.Remove(tmpPath)
+			return apperror.Internal("failed to write extraction", err)
+		}
+		if err := os.Rename(tmpPath, path); err != nil {
+			os.Remove(tmpPath)
+			return apperror.Internal("failed to finalize extraction", err)
+		}
+		slog.Info("KHS extraction saved", "npm", npm, "file", file, "path", path)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return apperror.Internal("failed to parse extraction", err)
+	}
+
+	return response.Success(c, fiber.StatusOK, result, "KHS extracted and saved successfully")
 }
 
 // findKRSFile finds the KRS PDF file for a given NPM and JSON filename.
