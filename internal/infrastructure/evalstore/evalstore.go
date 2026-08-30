@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"lonceng_unman_be/internal/domain/entity"
+	"lonceng_unman_be/internal/domain/port"
 )
 
 // Store implements port.EvalStore.
@@ -15,6 +16,73 @@ type Store struct {
 	evalDir     string
 	extractDir  string
 	downloadDir string
+}
+
+// cachedStore wraps a port.EvalStore with an in-memory cache scoped to a single
+// request. Each unique file is read from disk at most once per request; the cache
+// is discarded (GC'd) when the request completes, eliminating stale-data risk.
+type cachedStore struct {
+	inner port.EvalStore
+	cache map[string][]byte
+}
+
+// NewCachedStore creates a new per-request cached store wrapping the given store.
+// The cache is scoped to a single request and GC'd when the request completes.
+func NewCachedStore(inner port.EvalStore) port.EvalStore {
+	return &cachedStore{inner: inner, cache: make(map[string][]byte)}
+}
+
+// cacheKey builds a stable cache key from the load parameters.
+func cacheKey(npm, docType, filename string) string {
+	return npm + "/" + docType + "/" + filename
+}
+
+// LoadGT returns cached GT data if available, otherwise delegates to the inner store.
+func (c *cachedStore) LoadGT(npm, docType, filename string) ([]byte, error) {
+	key := cacheKey(npm, docType, filename)
+	if data, ok := c.cache[key]; ok {
+		return data, nil
+	}
+	data, err := c.inner.LoadGT(npm, docType, filename)
+	if err != nil {
+		return nil, err
+	}
+	c.cache[key] = data
+	return data, nil
+}
+
+// LoadExtract returns cached extract data if available, otherwise delegates to the inner store.
+func (c *cachedStore) LoadExtract(npm, docType, filename string) ([]byte, error) {
+	key := cacheKey(npm, docType, filename)
+	if data, ok := c.cache[key]; ok {
+		return data, nil
+	}
+	data, err := c.inner.LoadExtract(npm, docType, filename)
+	if err != nil {
+		return nil, err
+	}
+	c.cache[key] = data
+	return data, nil
+}
+
+// ListNPMs passthrough — no caching needed (already fast, called once per request).
+func (c *cachedStore) ListNPMs() ([]string, error) {
+	return c.inner.ListNPMs()
+}
+
+// ListDocs passthrough — no caching needed (already fast, called once per NPM).
+func (c *cachedStore) ListDocs(npm string) ([]entity.NPMDoc, error) {
+	return c.inner.ListDocs(npm)
+}
+
+// WriteGT passthrough — writes are not cached.
+func (c *cachedStore) WriteGT(npm, docType, filename string, data []byte) error {
+	return c.inner.WriteGT(npm, docType, filename, data)
+}
+
+// Exists passthrough — stat calls are cheap and not the bottleneck.
+func (c *cachedStore) Exists(npm, docType, filename string) (bool, bool, error) {
+	return c.inner.Exists(npm, docType, filename)
 }
 
 // New creates a new EvalStore.

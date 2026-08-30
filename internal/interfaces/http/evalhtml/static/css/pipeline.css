@@ -4,6 +4,45 @@
    (--neu-*, --eval-*) — do NOT redefine them here.
    ============================================================================ */
 
+/* ---- Native <details> collapse for phase cards ------------------------ */
+/* Arrow rotation: chevron-right (closed) → chevron-down (open) */
+.pipeline-phase-card > summary .details-toggle {
+    transition: transform var(--pipeline-stage-transition) ease;
+}
+
+.pipeline-phase-card[open] > summary .details-toggle.bi-chevron-right {
+    transform: rotate(90deg);
+}
+
+.pipeline-phase-card[open] > summary .details-toggle.bi-chevron-down {
+    transform: rotate(0deg);
+}
+
+/* Hover effect on summary */
+.pipeline-phase-card > summary:hover {
+    background-color: var(--bs-light, #f8f9fa) !important;
+}
+
+/* Smooth appearance when details opens */
+.pipeline-phase-card .card-body {
+    animation: details-show var(--pipeline-stage-transition) ease-in-out;
+}
+
+@keyframes details-show {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Reduced motion — disable details animation */
+@media (prefers-reduced-motion: reduce) {
+    .pipeline-phase-card .card-body {
+        animation: none;
+    }
+    .pipeline-phase-card > summary .details-toggle {
+        transition: none;
+    }
+}
+
 /* ---- Animation duration tokens (overridable from JS) -------------------- */
 :root {
     --pipeline-particle-duration: 2.4s;

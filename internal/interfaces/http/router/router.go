@@ -124,7 +124,7 @@ func staticHandler(c fiber.Ctx) error {
 		c.Set("Content-Type", ct)
 	}
 	// Long-lived cache for static assets (they're embedded in the binary).
-	c.Set("Cache-Control", "public, max-age=300")
+	c.Set("Cache-Control", "public, max-age=31536000, immutable")
 
 	return c.Send(data)
 }

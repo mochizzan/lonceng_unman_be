@@ -273,3 +273,107 @@ func TestBuildCompareRowsKHS_WrongNilai_ProducesWrongStatus(t *testing.T) {
 		t.Errorf("expected to find wrong status for nilai/mutu fields")
 	}
 }
+
+// mockEvalStoreForNameLookup is a test double for name lookup tests.
+type mockEvalStoreForNameLookup struct {
+	docs        []entity.NPMDoc
+	gtData      map[string][]byte
+	extractData map[string][]byte
+}
+
+func (m *mockEvalStoreForNameLookup) ListNPMs() ([]string, error) { return nil, nil }
+func (m *mockEvalStoreForNameLookup) ListDocs(npm string) ([]entity.NPMDoc, error) {
+	return m.docs, nil
+}
+
+func (m *mockEvalStoreForNameLookup) LoadGT(npm, docType, filename string) ([]byte, error) {
+	key := npm + "/" + docType + "/" + filename
+	return m.gtData[key], nil
+}
+
+func (m *mockEvalStoreForNameLookup) LoadExtract(npm, docType, filename string) ([]byte, error) {
+	key := npm + "/" + docType + "/" + filename
+	return m.extractData[key], nil
+}
+
+func (m *mockEvalStoreForNameLookup) WriteGT(npm, docType, filename string, data []byte) error {
+	return nil
+}
+
+func (m *mockEvalStoreForNameLookup) Exists(npm, docType, filename string) (bool, bool, error) {
+	return false, false, nil
+}
+
+func TestIndexNameLookupPartialDecode(t *testing.T) {
+	// Build a mock store with KHS GT data containing full extraction fields
+	mock := &mockEvalStoreForNameLookup{
+		docs: []entity.NPMDoc{
+			{DocType: "khs", File: "2022_2023_GANJIL.json", HasGT: true, HasExtract: false, Paired: false},
+			{DocType: "krs", File: "semester_8.json", HasGT: true, HasExtract: false, Paired: false},
+		},
+		gtData: map[string][]byte{
+			"2211700006/khs/2022_2023_GANJIL.json": []byte(`{
+				"khs": {
+					"mahasiswa": {
+						"nama": "Budi Santoso",
+						"npm": "2211700006",
+						"program_studi": "Sistem Informasi"
+					},
+					"periode": {
+						"tahun_ajaran": {"awal": "2022", "akhir": "2023"},
+						"semester": "GANJIL"
+					},
+					"mata_kuliah": [{"no": 1, "kode": "SI40306", "nama": "Basis Data", "sks": 3, "nilai": "A", "mutu": 12}],
+					"rekapitulasi": {"total_sks": 24, "total_mutu": 90, "ipk": 3.75},
+					"penerbitan": {"tanggal": "2023-01-15"},
+					"persetujuan": {"dosen_wali": "Dr. X"}
+				},
+				"metadata": {"extracted_at": "2023-01-15T10:00:00Z", "source_file": "khs.pdf", "file_size": 1024, "document_category": "extracted"}
+			}`),
+		},
+	}
+
+	svc := service.NewEvalService(mock)
+
+	// Call fastNameLookup which should use partial decode
+	name := svc.FastNameLookup("2211700006")
+	if name != "Budi Santoso" {
+		t.Fatalf("expected 'Budi Santoso', got %q", name)
+	}
+}
+
+func TestIndexNameLookupPartialDecode_FallbackToFull(t *testing.T) {
+	// Test that partial decode works for KRS too
+	mock := &mockEvalStoreForNameLookup{
+		docs: []entity.NPMDoc{
+			{DocType: "krs", File: "semester_8.json", HasGT: true, HasExtract: false, Paired: false},
+		},
+		gtData: map[string][]byte{
+			"2211700006/krs/semester_8.json": []byte(`{
+				"krs": {
+					"mahasiswa": {
+						"nama": "Ani Wijaya",
+						"npm": "2211700006",
+						"program_studi": "Teknik Informatika"
+					},
+					"periode": {
+						"tahun_ajaran": {"awal": "2022", "akhir": "2023"},
+						"semester": "8"
+					},
+					"mata_kuliah": [],
+					"total_sks": 24,
+					"penerbitan": {"tanggal": "2023-01-15"},
+					"persetujuan": {"dosen_wali": "Dr. Y"}
+				},
+				"metadata": {"extracted_at": "2023-01-15T10:00:00Z"}
+			}`),
+		},
+	}
+
+	svc := service.NewEvalService(mock)
+
+	name := svc.FastNameLookup("2211700006")
+	if name != "Ani Wijaya" {
+		t.Fatalf("expected 'Ani Wijaya', got %q", name)
+	}
+}

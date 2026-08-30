@@ -9,6 +9,7 @@ import (
 
 	"lonceng_unman_be/internal/domain/entity"
 	"lonceng_unman_be/internal/domain/port"
+	"lonceng_unman_be/internal/infrastructure/evalstore"
 )
 
 // EvalService implements port.EvalService.
@@ -28,38 +29,21 @@ func (s *EvalService) Index() (entity.UnifiedEval, error) {
 		return entity.UnifiedEval{}, err
 	}
 
+	// Per-request cached store: each file read from disk at most once.
+	cs := evalstore.NewCachedStore(s.store)
+
 	var allRows []entity.UnifiedTableRow
 	var krsTP, krsFN, krsFP, krsTN int
 	var khsTP, khsFN, khsFP, khsTN int
 
 	for _, npm := range npms {
-		docs, err := s.store.ListDocs(npm)
+		docs, err := cs.ListDocs(npm)
 		if err != nil {
 			continue
 		}
 
-		// Get student info
-		name := ""
-		for _, doc := range docs {
-			if doc.HasGT {
-				gtData, err := s.store.LoadGT(npm, doc.DocType, doc.File)
-				if err == nil {
-					if doc.DocType == "khs" {
-						var gt entity.KHSExtraction
-						if err := json.Unmarshal(gtData, &gt); err == nil {
-							name = gt.KHS.Mahasiswa.Nama
-							break
-						}
-					} else {
-						var gt entity.KRSExtraction
-						if err := json.Unmarshal(gtData, &gt); err == nil {
-							name = gt.KRS.Mahasiswa.Nama
-							break
-						}
-					}
-				}
-			}
-		}
+		// Get student info using partial decode (only extract "nama" field).
+		name := s.fastNameLookupWithStore(cs, npm)
 
 		for _, doc := range docs {
 			row := entity.IndexRow{
@@ -115,7 +99,7 @@ func (s *EvalService) Index() (entity.UnifiedEval, error) {
 
 			// Compute metrics only for paired docs
 			if doc.Paired {
-				metrics, err := s.evaluateDoc(npm, doc.DocType, doc.File)
+				metrics, err := s.evaluateDocWithStore(cs, npm, doc.DocType, doc.File)
 				if err == nil {
 					row.Metrics = metrics
 					unifiedRow.Metrics = metrics
@@ -165,34 +149,18 @@ func (s *EvalService) Index() (entity.UnifiedEval, error) {
 func (s *EvalService) Student(npm string) (entity.StudentEval, error) {
 	result := entity.StudentEval{NPM: npm}
 
-	docs, err := s.store.ListDocs(npm)
+	// Per-request cached store: each file read from disk at most once.
+	cs := evalstore.NewCachedStore(s.store)
+
+	docs, err := cs.ListDocs(npm)
 	if err != nil {
 		return result, err
 	}
 
-	// Get student info
-	for _, doc := range docs {
-		if doc.HasGT {
-			gtData, err := s.store.LoadGT(npm, doc.DocType, doc.File)
-			if err == nil {
-				if doc.DocType == "khs" {
-					var gt entity.KHSExtraction
-					if err := json.Unmarshal(gtData, &gt); err == nil {
-						result.Name = gt.KHS.Mahasiswa.Nama
-						result.ProgramStudi = gt.KHS.Mahasiswa.ProgramStudi
-						break
-					}
-				} else {
-					var gt entity.KRSExtraction
-					if err := json.Unmarshal(gtData, &gt); err == nil {
-						result.Name = gt.KRS.Mahasiswa.Nama
-						result.ProgramStudi = gt.KRS.Mahasiswa.ProgramStudi
-						break
-					}
-				}
-			}
-		}
-	}
+	// Get student info using partial decode (only extract "nama" field).
+	name, programStudi := s.studentInfoWithStore(cs, npm)
+	result.Name = name
+	result.ProgramStudi = programStudi
 
 	var krsTP, krsFN, krsFP, krsTN int
 	var khsTP, khsFN, khsFP, khsTN int
@@ -213,11 +181,11 @@ func (s *EvalService) Student(npm string) (entity.StudentEval, error) {
 		}
 
 		if doc.Paired {
-			metrics, err := s.evaluateDoc(npm, doc.DocType, doc.File)
+			metrics, err := s.evaluateDocWithStore(cs, npm, doc.DocType, doc.File)
 			if err == nil {
 				docEval.Metrics = metrics
 				docEval.Heatmap = buildHeatmapFromMetrics(metrics)
-				docEval.CompareRows = s.buildCompareRows(npm, doc.DocType, doc.File)
+				docEval.CompareRows = s.buildCompareRowsWithStore(cs, npm, doc.DocType, doc.File)
 
 				if doc.DocType == "krs" {
 					krsTP += metrics.Confusion.TP
@@ -254,75 +222,6 @@ func (s *EvalService) LoadGT(npm, docType, filename string) ([]byte, error) {
 // LoadExtract exposes store.LoadExtract for handler use.
 func (s *EvalService) LoadExtract(npm, docType, filename string) ([]byte, error) {
 	return s.store.LoadExtract(npm, docType, filename)
-}
-
-// evaluateDoc evaluates a single document pair.
-func (s *EvalService) evaluateDoc(npm, docType, filename string) (entity.Metrics, error) {
-	gtData, err := s.store.LoadGT(npm, docType, filename)
-	if err != nil {
-		return entity.Metrics{}, err
-	}
-	extractData, err := s.store.LoadExtract(npm, docType, filename)
-	if err != nil {
-		return entity.Metrics{}, err
-	}
-
-	var tp, fn, fp, tn int
-	heatmapAgg := make(map[string]*entity.FieldHeatmapRow)
-
-	if docType == "khs" {
-		var gt, extract entity.KHSExtraction
-		if err := json.Unmarshal(gtData, &gt); err != nil {
-			return entity.Metrics{}, err
-		}
-		if err := json.Unmarshal(extractData, &extract); err != nil {
-			return entity.Metrics{}, err
-		}
-
-		t, f, p, tn0 := s.compareKHSHeaders(&gt, &extract, heatmapAgg)
-		tp += t
-		fn += f
-		fp += p
-		tn += tn0
-
-		courseResults := MatchKHSCourses(gt.KHS.MataKuliah, extract.KHS.MataKuliah)
-		for _, cr := range courseResults {
-			if !cr.Matched {
-				if cr.IsGTOnly {
-					fn += 6
-				} else {
-					fp += 6
-				}
-			}
-		}
-	} else {
-		var gt, extract entity.KRSExtraction
-		if err := json.Unmarshal(gtData, &gt); err != nil {
-			return entity.Metrics{}, err
-		}
-		if err := json.Unmarshal(extractData, &extract); err != nil {
-			return entity.Metrics{}, err
-		}
-
-		t, f, p, tn0 := s.compareHeaders(&gt, &extract, heatmapAgg)
-		tp += t
-		fn += f
-		fp += p
-		tn += tn0
-
-		courseResults := MatchCourses(gt.KRS.MataKuliah, extract.KRS.MataKuliah)
-		for _, cr := range courseResults {
-			if !cr.Matched {
-				if cr.IsGTOnly {
-					fn += 8
-				} else {
-					fp += 8
-				}
-			}
-		}
-	}
-
-	return computeMetrics(tp, fn, fp, tn), nil
 }
 
 // compareKHSHeaders compares KHS header fields between GT and extract.
@@ -382,38 +281,6 @@ func (s *EvalService) compareHeaders(gt, extract *entity.KRSExtraction, heatmapA
 	}
 
 	return tp, fn, fp, tn
-}
-
-// buildCompareRows builds the compare rows for the detail page.
-func (s *EvalService) buildCompareRows(npm, docType, filename string) []entity.CompareRow {
-	gtData, err := s.store.LoadGT(npm, docType, filename)
-	if err != nil {
-		return []entity.CompareRow{}
-	}
-	extractData, err := s.store.LoadExtract(npm, docType, filename)
-	if err != nil {
-		return []entity.CompareRow{}
-	}
-
-	if docType == "khs" {
-		var gt, extract entity.KHSExtraction
-		if err := json.Unmarshal(gtData, &gt); err != nil {
-			return []entity.CompareRow{}
-		}
-		if err := json.Unmarshal(extractData, &extract); err != nil {
-			return []entity.CompareRow{}
-		}
-		return BuildCompareRowsKHS(&gt, &extract)
-	}
-
-	var gt, extract entity.KRSExtraction
-	if err := json.Unmarshal(gtData, &gt); err != nil {
-		return []entity.CompareRow{}
-	}
-	if err := json.Unmarshal(extractData, &extract); err != nil {
-		return []entity.CompareRow{}
-	}
-	return BuildCompareRows(&gt, &extract)
 }
 
 // buildHeatmapFromMetrics builds heatmap from metrics.
@@ -523,21 +390,21 @@ func (s *EvalService) StudentList() ([]StudentEntry, error) {
 	}
 	entries := make([]StudentEntry, 0, len(npms))
 	for _, npm := range npms {
-		name := s.fastNameLookup(npm)
+		name := s.FastNameLookup(npm)
 		entries = append(entries, StudentEntry{NPM: npm, Name: name})
 	}
 	return entries, nil
 }
 
-// fastNameLookup does a partial JSON decode to extract only the "nama" field.
-// Avoids full evaluateDoc() which reads both GT + extract and compares all fields.
-func (s *EvalService) fastNameLookup(npm string) string {
-	docs, _ := s.store.ListDocs(npm)
+// fastNameLookupWithStore does a partial JSON decode to extract only the "nama" field
+// using the provided store (which may be cached). Avoids full evaluateDoc().
+func (s *EvalService) fastNameLookupWithStore(st port.EvalStore, npm string) string {
+	docs, _ := st.ListDocs(npm)
 	for _, doc := range docs {
 		if !doc.HasGT {
 			continue
 		}
-		gtData, err := s.store.LoadGT(npm, doc.DocType, doc.File)
+		gtData, err := st.LoadGT(npm, doc.DocType, doc.File)
 		if err != nil {
 			continue
 		}
@@ -564,4 +431,150 @@ func (s *EvalService) fastNameLookup(npm string) string {
 		}
 	}
 	return ""
+}
+
+// studentInfoWithStore extracts nama and program_studi using partial decode.
+func (s *EvalService) studentInfoWithStore(st port.EvalStore, npm string) (name, programStudi string) {
+	docs, _ := st.ListDocs(npm)
+	for _, doc := range docs {
+		if !doc.HasGT {
+			continue
+		}
+		gtData, err := st.LoadGT(npm, doc.DocType, doc.File)
+		if err != nil {
+			continue
+		}
+		// Partial decode — extract nama and program_studi
+		var partial struct {
+			KHS struct {
+				Mahasiswa struct {
+					Nama         string `json:"nama"`
+					ProgramStudi string `json:"program_studi"`
+				} `json:"mahasiswa"`
+			} `json:"khs"`
+			KRS struct {
+				Mahasiswa struct {
+					Nama         string `json:"nama"`
+					ProgramStudi string `json:"program_studi"`
+				} `json:"mahasiswa"`
+			} `json:"krs"`
+		}
+		if err := json.Unmarshal(gtData, &partial); err == nil {
+			if partial.KHS.Mahasiswa.Nama != "" {
+				return partial.KHS.Mahasiswa.Nama, partial.KHS.Mahasiswa.ProgramStudi
+			}
+			if partial.KRS.Mahasiswa.Nama != "" {
+				return partial.KRS.Mahasiswa.Nama, partial.KRS.Mahasiswa.ProgramStudi
+			}
+		}
+	}
+	return "", ""
+}
+
+// evaluateDocWithStore evaluates a single document pair using the provided store.
+func (s *EvalService) evaluateDocWithStore(st port.EvalStore, npm, docType, filename string) (entity.Metrics, error) {
+	gtData, err := st.LoadGT(npm, docType, filename)
+	if err != nil {
+		return entity.Metrics{}, err
+	}
+	extractData, err := st.LoadExtract(npm, docType, filename)
+	if err != nil {
+		return entity.Metrics{}, err
+	}
+
+	var tp, fn, fp, tn int
+	heatmapAgg := make(map[string]*entity.FieldHeatmapRow)
+
+	if docType == "khs" {
+		var gt, extract entity.KHSExtraction
+		if err := json.Unmarshal(gtData, &gt); err != nil {
+			return entity.Metrics{}, err
+		}
+		if err := json.Unmarshal(extractData, &extract); err != nil {
+			return entity.Metrics{}, err
+		}
+
+		t, f, p, tn0 := s.compareKHSHeaders(&gt, &extract, heatmapAgg)
+		tp += t
+		fn += f
+		fp += p
+		tn += tn0
+
+		courseResults := MatchKHSCourses(gt.KHS.MataKuliah, extract.KHS.MataKuliah)
+		for _, cr := range courseResults {
+			if !cr.Matched {
+				if cr.IsGTOnly {
+					fn += 6
+				} else {
+					fp += 6
+				}
+			}
+		}
+	} else {
+		var gt, extract entity.KRSExtraction
+		if err := json.Unmarshal(gtData, &gt); err != nil {
+			return entity.Metrics{}, err
+		}
+		if err := json.Unmarshal(extractData, &extract); err != nil {
+			return entity.Metrics{}, err
+		}
+
+		t, f, p, tn0 := s.compareHeaders(&gt, &extract, heatmapAgg)
+		tp += t
+		fn += f
+		fp += p
+		tn += tn0
+
+		courseResults := MatchCourses(gt.KRS.MataKuliah, extract.KRS.MataKuliah)
+		for _, cr := range courseResults {
+			if !cr.Matched {
+				if cr.IsGTOnly {
+					fn += 8
+				} else {
+					fp += 8
+				}
+			}
+		}
+	}
+
+	return computeMetrics(tp, fn, fp, tn), nil
+}
+
+// buildCompareRowsWithStore builds compare rows using the provided store.
+func (s *EvalService) buildCompareRowsWithStore(st port.EvalStore, npm, docType, filename string) []entity.CompareRow {
+	gtData, err := st.LoadGT(npm, docType, filename)
+	if err != nil {
+		return []entity.CompareRow{}
+	}
+	extractData, err := st.LoadExtract(npm, docType, filename)
+	if err != nil {
+		return []entity.CompareRow{}
+	}
+
+	if docType == "khs" {
+		var gt, extract entity.KHSExtraction
+		if err := json.Unmarshal(gtData, &gt); err != nil {
+			return []entity.CompareRow{}
+		}
+		if err := json.Unmarshal(extractData, &extract); err != nil {
+			return []entity.CompareRow{}
+		}
+		return BuildCompareRowsKHS(&gt, &extract)
+	}
+
+	var gt, extract entity.KRSExtraction
+	if err := json.Unmarshal(gtData, &gt); err != nil {
+		return []entity.CompareRow{}
+	}
+	if err := json.Unmarshal(extractData, &extract); err != nil {
+		return []entity.CompareRow{}
+	}
+	return BuildCompareRows(&gt, &extract)
+}
+
+// FastNameLookup does a partial JSON decode to extract only the "nama" field.
+// Avoids full evaluateDoc() which reads both GT + extract and compares all fields.
+// Exported for testing purposes.
+func (s *EvalService) FastNameLookup(npm string) string {
+	return s.fastNameLookupWithStore(s.store, npm)
 }

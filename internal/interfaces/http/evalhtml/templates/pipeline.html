@@ -42,12 +42,13 @@
                     <div class="tab-pane fade show active" id="formulas" role="tabpanel" aria-labelledby="formulas-tab">
                         <div class="row g-3 mt-2">
 
-                            <!-- Fase 1: Pembacaan PDF -->
+                            <!-- Fase 1: Pembacaan PDF (open by default) -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-primary">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-primary" open>
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-file-earmark-pdf text-primary"></i> Fase 1 — Pembacaan PDF</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-down ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Fungsi:</strong> <code>ReadPDFWithPosition()</code> di <code>pdf_reader.go</code></p>
                                         <p>Mengekstrak span teks dengan posisi X,Y dari setiap halaman dokumen PDF.</p>
@@ -65,15 +66,16 @@ func ReadPDFWithPosition(ctx context.Context, pdfPath string) ([]Page, error) {
                                             <span class="badge bg-primary bg-opacity-10 text-primary">[]Span{X, Y, Text}</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 2: Transformasi Koordinat -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-success">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-success">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-arrow-down text-success"></i> Fase 2 — Transformasi Koordinat</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Kode:</strong> <code>flipY = pageHeight - span.Y</code> di <code>pdf_reader.go</code></p>
                                         <p>Membalik sumbu Y dari origin PDF (kiri bawah) ke origin layar (kiri atas).</p>
@@ -90,15 +92,16 @@ func flipYCoord(span Span, pageHeight float64) float64 {
                                             <span class="badge bg-success bg-opacity-10 text-success">Layar Y (atas)</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 3: Pengelompokan Baris -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-info">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-info">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-grid-3x3 text-info"></i> Fase 3 — Pengelompokan Baris</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Rumus:</strong> <code>roundY(y) = float64(int(y*4))/4.0</code> di <code>pdf_reader.go</code></p>
                                         <p>Membulatkan Y ke 0.25 terdekat untuk mengelompokkan kata pada garis horizontal yang sama.</p>
@@ -119,15 +122,16 @@ func roundY(y float64) float64 {
                                             <span class="badge bg-info bg-opacity-10 text-info">Baris Terkelompok</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 4: Konstruksi Baris -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-warning">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-warning">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-layout-text-sidebar-reverse text-warning"></i> Fase 4 — Konstruksi Baris</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Fungsi:</strong> <code>RowToLine()</code> di <code>pdf_reader.go</code></p>
                                         <p>Mengelompokkan kata berdasarkan posisi X; menggabungkan kata pada X yang sama tanpa spasi, kata pada X berbeda dengan spasi.</p>
@@ -152,15 +156,16 @@ func RowToLine(spans []Span) string {
                                             <span class="badge bg-warning bg-opacity-10 text-warning">Baris</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 5: Deteksi Kolom -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-danger">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-danger">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-layout-columns text-danger"></i> Fase 5 — Deteksi Kolom</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Fungsi:</strong> <code>FindColumnPositions()</code> di <code>pdf_reader.go</code></p>
                                         <p>Mengelompokkan kata header berdasarkan X, mencocokkan nama kolom yang diketahui, menghitung batas sebagai titik tengah antara posisi X yang berdekatan.</p>
@@ -186,15 +191,16 @@ func FindColumnPositions(headerRow []Span) []Column {
                                             <span class="badge bg-danger bg-opacity-10 text-danger">Rentang Batas</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 6: Ekstraksi Kolom -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-primary">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-primary">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-text-paragraph text-primary"></i> Fase 6 — Ekstraksi Kolom</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Fungsi:</strong> <code>ExtractColumnsFromRow()</code> di <code>pdf_reader.go</code></p>
                                         <p>Mengambil kata yang X-nya berada dalam rentang [Start, End) untuk setiap kolom.</p>
@@ -223,15 +229,16 @@ func ExtractColumnsFromRow(row Row, cols []Column) map[string]string {
                                             <span class="badge bg-primary bg-opacity-10 text-primary">map[col]nilai</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 7: Pintar Kata Split -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-success">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-success">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-magic text-success"></i> Fase 7 — Pintar Kata Split</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Fungsi:</strong> <code>SmartWordSplit()</code> di <code>pdf_reader.go</code></p>
                                         <p>Memisahkan kata yang digabungkan menggunakan deteksi CamelCase, batas digit, dan deteksi singkatan (2+ huruf kapital).</p>
@@ -260,15 +267,16 @@ func SmartWordSplit(token string) []string {
                                             <span class="badge bg-success bg-opacity-10 text-success">Kata Terpisah</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 8: Parsing KRS -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-info">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-info">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-journal-text text-info"></i> Fase 8 — Parsing KRS</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Fungsi:</strong> <code>parseKRSMataKuliah()</code> di <code>krs_parser.go</code></p>
                                         <p>Memindai SEMUA baris, menduplikasi dengan kunci <code>kode:kelas</code>, mengekstrak jadwal dari kolom JADWAL.</p>
@@ -299,15 +307,16 @@ func parseKRSMataKuliah(rows []Row) []MataKuliah {
                                             <span class="badge bg-info bg-opacity-10 text-info">Mata Kuliah KRS</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 9: Parsing KHS -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-warning">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-warning">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-journal-check text-warning"></i> Fase 9 — Parsing KHS</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Fungsi:</strong> <code>parseKHSMataKuliah()</code> di <code>khs_parser.go</code></p>
                                         <p>Menangani entri multi-baris: baris nama sebelumnya, data mata kuliah, baris dosen setelahnya. Menduplikasi dengan <code>no</code> (nomor baris).</p>
@@ -347,15 +356,16 @@ func parseKHSMataKuliah(rows []Row) []MKHasilStudi {
                                             <span class="badge bg-warning bg-opacity-10 text-warning">Mata Kuliah KHS</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 10: Deduplikasi -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-danger">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-danger">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-funnel text-danger"></i> Fase 10 — Deduplikasi</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Strategi:</strong> KRS dengan <code>kode:kelas</code>, KHS dengan <code>no</code></p>
                                         <p>Mencegah entri mata kuliah duplikat ketika mata kuliah yang sama muncul beberapa kali dalam dokumen.</p>
@@ -385,15 +395,16 @@ if !seen[key] {
                                             <span class="badge bg-danger bg-opacity-10 text-danger">Terdeduplikasi</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                             <!-- Fase 11: Output JSON -->
                             <div class="col-12">
-                                <div class="card border-0 shadow-sm border-start border-4 border-primary">
-                                    <div class="card-header bg-white">
+                                <details class="pipeline-phase-card border-0 shadow-sm border-start border-4 border-primary">
+                                    <summary class="card-header bg-white" style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.75rem;">
                                         <h5 class="mb-0"><i class="bi bi-file-earmark-code text-primary"></i> Fase 11 — Output JSON</h5>
-                                    </div>
+                                        <i class="bi bi-chevron-right ms-auto text-muted details-toggle"></i>
+                                    </summary>
                                     <div class="card-body">
                                         <p><strong>Fungsi:</strong> <code>MarshalToJSON()</code></p>
                                         <p>Serialisasi data mata kuliah terstruktur ke format JSON untuk respons API atau penyimpanan.</p>
@@ -426,7 +437,7 @@ func MarshalToJSON(data interface{}) ([]byte, error) {
                                             <span class="badge bg-primary bg-opacity-10 text-primary">Output JSON</span>
                                         </div>
                                     </div>
-                                </div>
+                                </details>
                             </div>
 
                         </div>
