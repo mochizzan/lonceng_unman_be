@@ -123,3 +123,5 @@ raw/
 .codebase-index
 eval
 .omp
+# CocoIndex Code (ccc)
+/.cocoindex_code/

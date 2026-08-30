@@ -1,184 +1,90 @@
 # Repository Guidelines
 
-> **IMPORTANT:** All agents MUST read this file before making changes to the codebase.
-
----
-
 ## Project Overview
 
-|Field|Value|
-|---|---|
-|**Project Year**|2026|
-|**Project Type**|REST API Backend|
-|**Language**|Go 1.26.4|
-|**Framework**|Fiber v3.4.0|
-|**PDF Library**|razvandimescu/gopdf v0.9.5|
-|**Browser Automation**|go-rod v0.116.2|
-|**Architecture**|Clean Architecture (4-layer)|
-|**Module Path**|`lonceng_unman_be`|
+**lonceng_unman_be** is a Go/Fiber v3 Clean Architecture backend for LMS (Learning Management System) automation at Universitas Mandiri. It provides automated browser-based scraping of student profiles, KRS/KHS PDF extraction, and structured data caching via a REST API.
 
-### Development Environment
-
-|Component|Value|
-|---|---|
-|**Host OS**|Windows 10 Pro|
-|**Shell / Bash**|Git Bash (MSYS2) — NOT WSL, NOT PowerShell, NOT cmd|
-|**Container Runtime**|Docker Desktop on Windows 10|
-|**Go Version**|1.26.4 (via Docker or local install)|
-
-Development runs inside Docker Desktop containers on Windows 10. The application uses multi-stage Docker builds with Alpine Linux + Chromium for headless browser automation. Local development uses `go run` or `go build` with Git Bash.
-
-### Production Environment
-
-|Component|Value|
-|---|---|
-|**Deployment Method**|Docker image push to container registry (manual)|
-|**Container Registry**|GitHub Container Registry (GHCR)|
-|**Image URI**|`ghcr.io/mochizzan/lonceng_unman_be:latest`|
-|**Runtime**|Docker Desktop on Windows 10 (same host as development)|
-|**Network Access**|cloudflared tunnel on Windows host → `localhost:3000`|
-
-Production is deployed via Git repository using container images from GHCR. The application runs on Docker Desktop on Windows 10, with network access provided by a cloudflared tunnel running on the Windows host. Deployment is manual — no CI/CD pipeline (no GitHub Actions workflow).
-
-**Lonceng Unman Backend** is a RESTful API for automated LMS (Learning Management System) document extraction. It logs into an academic LMS via headless Chrome, downloads KRS (course registration) and KHS (grade report) PDFs, parses them into structured JSON using position-based PDF extraction, and caches results. No database — all data is in-memory or file-based.
+- **Stack**: Go 1.26.4, Fiber v3.4.0, go-rod (browser automation), gopdf (PDF parsing), godotenv
+- **Production**: Windows / WSL2 / Docker / Cloudflared tunnel
+- **Container Image**: `ghcr.io/mochizzan/lonceng_unman_be:latest`
 
 ---
 
 ## Architecture & Data Flow
 
-### Clean Architecture (4-Layer)
+### Clean Architecture Layers
+
+The project follows a layered Clean Architecture with dependency inversion via port interfaces:
 
 ```
-cmd/server/main.go                    ← Composition root (DI wiring ONLY)
-internal/
-├── config/config.go                  ← Environment-based config + validation
-├── apperror/apperror.go              ← AppError type + sentinels (cross-cutting)
-├── domain/                           ← Layer 1: Pure business logic (zero dependencies)
-│   ├── entity/                       ← Data models (no external imports)
-│   │   ├── health.go                 ← HealthStatus
-│   │   ├── lms.go                    ← LoginRequest, LoginResult
-│   │   ├── document.go               ← KRS/KHS download requests/results, KHSFilename
-│   │   ├── extraction.go             ← KRSExtraction, KHSExtraction, ExtractionResult
-│   │   ├── eval.go                   ← Metrics, ConfusionCounts, CompareRow, etc.
-│   │   └── student_profile.go        ← StudentProfile, StudentProfileRequest
-│   └── port/                         ← Interfaces for outer layers
-│       ├── browser.go                ← BrowserSession interface
-│       ├── session.go                ← SessionManager interface
-│       ├── extraction.go             ← PDFParser, ExtractionCache interfaces
-│       ├── eval.go                   ← EvalStore, EvalService interfaces
-│       ├── student_profile_scraper.go← StudentProfileScraper interface
-│       └── lms_config.go             ← LMSConfig constants (CSS selectors, URL paths)
-├── application/service/              ← Layer 2: Business logic implementations
-│   ├── health_service.go             ← HealthChecker interface + impl
-│   ├── lms_service.go                ← LMSLogin + LMSDocumentService interfaces + impl
-│   ├── extraction_service.go         ← ExtractionService interface + impl
-│   ├── eval_service.go               ← EvalService (ground-truth comparison)
-│   └── student_profile_service.go    ← StudentProfileService (scrape, get, get photo)
-├── interfaces/http/                  ← Layer 3: HTTP transport
-│   ├── handler/                      ← Request handlers (depend on service interfaces)
-│   │   ├── health_handler.go         ← HealthHandler (→ service.HealthChecker)
-│   │   ├── lms_handler.go            ← LMSHandler (→ service.LMSLogin)
-│   │   ├── document_handler.go       ← DocumentHandler (→ service.LMSDocumentService)
-│   │   ├── extraction_handler.go     ← ExtractionHandler (→ service.ExtractionService)
-│   │   ├── student_profile_handler.go← StudentProfileHandler (→ service.StudentProfileService)
-│   │   ├── eval_handler.go           ← EvalHandler (HTML pages + JSON APIs)
-│   │   └── eval_gt_handler.go        ← EvalGTHandler (save ground truth)
-│   ├── router/router.go              ← 12 routes under /api/v1
-│   └── response/response.go          ← Uniform JSON response envelope (Success/Error)
-└── infrastructure/                   ← Layer 4: External implementations
-    ├── middleware/middleware.go       ← recover → requestid → logger → gzip → cors
-    ├── logger/logger.go              ← slog-based structured logging
-    ├── fibererror/handler.go         ← Global error handler (AppError cascade)
-    ├── browser/
-    │   ├── browser.go                ← go-rod Browser wrapper
-    │   ├── selectors.go              ← CSS selectors + URL paths for LMS
-    │   ├── download.go               ← PDF/image download via JS fetch()
-    │   └── scraper.go                ← StudentProfileScraper (browser automation)
-    ├── session/
-    │   ├── manager.go                ← In-memory session cache with TTL + Chrome profile persistence
-    │   └── session.go                ← rodSession: thread-safe BrowserSession impl
-    ├── extractor/
-    │   ├── pdf_reader.go             ← PDF text extraction with positional data
-    │   ├── parser_common.go          ← Shared constants + helpers (KRS & KHS), NormalizeLabel
-    │   ├── krs_parser.go             ← Structured KRS extraction from PDF (position-based)
-    │   ├── khs_parser.go             ← Structured KHS extraction from PDF (position-based)
-    │   └── cache.go                  ← File-based extraction cache + MarshalJSON
-    ├── evalstore/
-    │   └── evalstore.go              ← File-based ground truth + extraction storage
-    └── photocache/
-        └── cache.go                  ← Student photo file cache with TTL + JSON metadata
+cmd/server/                          ← Composition root, DI wiring, entry point
+  └── internal/interfaces/http/      ← HTTP handlers, router, middleware, response envelopes
+      └── internal/application/service/  ← Use cases, orchestration, DTOs
+          └── internal/domain/       ← Entities, value objects, port interfaces (business contracts)
+              └── internal/infrastructure/  ← Concrete implementations (browser, session, PDF, cache)
 ```
 
-### Dependency Rule
+### Layer Responsibilities
 
-Dependencies flow **inward only**:
+| Layer | Path | Responsibility |
+|-------|------|----------------|
+| **Entry** | `cmd/server/main.go` | Loads config, initializes logger, wires dependencies via constructor injection, registers routes, starts server |
+| **Interfaces** | `internal/interfaces/http/` | Fiber handlers, middleware chain, response envelopes |
+| **Application** | `internal/application/service/` | Use cases: LMS login, document extraction, student profile scraping, eval comparison |
+| **Domain** | `internal/domain/entity/` + `internal/domain/port/` | Business entities and interface contracts (ports) that infrastructure implements |
+| **Infrastructure** | `internal/infrastructure/` | go-rod browser, session manager, PDF extractor, photo cache, eval store, logger, auth middleware |
 
-```
-domain/entity ← application/service ← interfaces/http ← infrastructure
-                         ↑
-                      config
-```
+### Key Domain Ports (Interfaces)
 
-- **Handlers** depend on service **interfaces**, NEVER on concrete types
-- **Handlers** NEVER import `infrastructure/`
-- **Infrastructure** is only wired in `cmd/server/main.go`
-- **apperror** imports Fiber ONLY for HTTP status code constants
-- **`parserAdapter`** in `cmd/server/main.go` bridges application→infrastructure by implementing `port.PDFParser` and delegating to `extractor` package functions
+Infrastructure implements these interfaces defined in the domain layer:
 
-### Request Lifecycle
+- `port.BrowserSession` — Navigate, Eval, ElementAttribute, ElementExists, DownloadPDF, DownloadImage, Close
+- `port.SessionManager` — GetOrCreate, Close, CloseAll (per-NPM authenticated browser sessions)
+- `port.PDFParser` — ParseKRS, ParseKHS, MarshalToJSON
+- `port.ExtractionCache` — Get, Set, Exists, GetModTime, Invalidate
+- `port.EvalStore` / `port.EvalService` — Ground-truth storage and evaluation logic
 
-```
-Client Request
-  → recover middleware (panic protection)
-  → requestid middleware (inject trace_id)
-  → logger middleware (request logging)
-  → gzip middleware (compression)
-  → cors middleware (CORS headers)
-  → router dispatch (POST /api/v1/<path>, except GET /health)
-  → handler method (parse JSON body via c.Bind().JSON)
-  → service method (business logic)
-  → entity response (domain data)
-  → response.Success() envelope
-  → JSON output: {"status":"success","data":{...},"message":"..."}
-```
-
-### Error Path
+### Request Data Flow
 
 ```
-handler returns apperror.* → fibererror ErrorHandler
-  → errors.As cascade: AppError → fiber.Error → generic
-  → logs internal details via slog.Error (NEVER exposed to client)
-  → returns sanitized JSON: {"status":"error","message":"...","trace_id":"..."}
+HTTP Request
+  → Fiber middleware (recover → requestid → logger → compress → CORS)
+  → Handler (validates NPM, extracts params)
+    → Application Service (orchestrates use case)
+      → Domain Port interfaces (abstract contracts)
+        → Infrastructure implementations (browser automation, PDF parsing, caching)
+    → Response envelope (Success/Error)
+  → HTTP Response
 ```
 
 ---
 
 ## Key Directories
 
-|Directory|Purpose|
-|---|---|
-|`cmd/server/`|Application entry point, dependency wiring|
-|`internal/config/`|Environment-based config loading and validation|
-|`internal/apperror/`|Shared error types (cross-cutting concern)|
-|`internal/domain/entity/`|Pure data models (zero dependencies)|
-|`internal/domain/port/`|Interface contracts for outer layers|
-|`internal/application/service/`|Business logic implementations|
-|`internal/interfaces/http/handler/`|HTTP request handlers|
-|`internal/interfaces/http/router/`|Route definitions|
-|`internal/interfaces/http/response/`|JSON response envelope|
-|`internal/infrastructure/middleware/`|Fiber middleware stack|
-|`internal/infrastructure/logger/`|Structured logging (slog)|
-|`internal/infrastructure/fibererror/`|Global error handler|
-|`internal/infrastructure/browser/`|go-rod browser automation|
-|`internal/infrastructure/session/`|Session management + Chrome profiles|
-|`internal/infrastructure/extractor/`|PDF extraction + caching|
-|`internal/infrastructure/evalstore/`|Ground truth + extraction file storage|
-|`internal/infrastructure/photocache/`|Student photo file cache|
-|`tests/`|External test packages (mirrors internal/)|
-|`downloads/`|Runtime PDF download directory (gitignored)|
-|`extracted/`|Runtime extraction cache directory (gitignored)|
-|`profiles/`|Persistent Chrome profile directories (gitignored)|
-|`docs/`|UML diagrams, API docs, implementation plans, design specs|
+| Directory | Purpose |
+|-----------|---------|
+| `cmd/server/` | Main server entry point and DI composition root |
+| `cmd/extractor/` | CLI tool for raw PDF text extraction (debugging utility) |
+| `internal/config/` | Configuration loading from env vars with validation |
+| `internal/domain/entity/` | Core business entities (KRS, KHSMataKuliah, Mahasiswa, StudentProfile, etc.) |
+| `internal/domain/port/` | Interface contracts that infrastructure must implement |
+| `internal/application/service/` | Use case implementations (health, lms, extraction, student_profile, eval) |
+| `internal/infrastructure/browser/` | go-rod browser automation, session scraper |
+| `internal/infrastructure/session/` | In-memory session manager with TTL eviction |
+| `internal/infrastructure/extractor/` | KRS/KHS PDF parsing with gopdf |
+| `internal/infrastructure/photocache/` | TTL-based student photo cache with compression |
+| `internal/infrastructure/evalstore/` | JSON file-based ground-truth storage |
+| `internal/interfaces/http/handler/` | HTTP handlers (health, lms, document, extraction, student_profile, eval, eval_gt, auth) |
+| `internal/interfaces/http/response/` | Standard API response envelopes |
+| `internal/interfaces/http/router/` | Route registration |
+| `internal/infrastructure/middleware/` | Auth, CORS, logging middleware |
+| `internal/infrastructure/logger/` | slog-based structured logger |
+| `internal/infrastructure/fibererror/` | Global Fiber error handler |
+| `internal/apperror/` | AppError constructors with PublicMsg/Internal separation |
+| `tests/` | Top-level test directory organized by feature |
+| `docs/api/` | API documentation (16 endpoint docs) |
+| `docs/architecture/` | Architecture diagrams and flow docs |
+| `tmp/` | Utility scripts (smoke tests, Excel generation, Mermaid rendering) |
 
 ---
 
@@ -187,201 +93,207 @@ handler returns apperror.* → fibererror ErrorHandler
 ### Build & Run
 
 ```bash
-# Run development server
-go run ./cmd/server
+# Build server binary
+go build -o bin/server.exe cmd/server/main.go
 
-# Build binary for current platform
-go build -o ./bin/server.exe ./cmd/server
+# Build and run (Windows)
+./run.cmd
 
-# Windows batch script (builds and runs)
-run.cmd
+# Run directly
+go run cmd/server/main.go
+
+# Build extractor CLI
+go build -o bin/extractor.exe cmd/extractor/main.go
 ```
 
 ### Docker
 
 ```bash
-# Build Docker image locally
-docker compose build
+# Build image
+docker build -t lonceng_unman_be .
 
-# Run container locally (pulls from GHCR in production config)
+# Run with compose
 docker compose up -d
 
-# View container logs
-docker compose logs -f lonceng-api
-
-# Stop containers
-docker compose down
-
-# Build with version tag
-docker compose build --build-arg VERSION=1.0.0 --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# Production image is multi-stage: golang:1.26.4-alpine (build+UPX) → alpine:3.20 (runtime+Chromium)
+# Final image: ~6MB compressed, non-root appuser, healthcheck on /api/v1/health
 ```
 
-### Test
+### Environment Configuration
+
+```bash
+# Copy and edit environment
+cp .env.example .env
+
+# Required variables (see .env.example for full list):
+# APP_NAME, APP_ENV (development/production), APP_PORT, APP_HOST
+# LMS_BASE_URL, LMS_DASHBOARD_URL
+# BROWSER_HEADLESS, BROWSER_TIMEOUT (min 60s for cold starts)
+# DOWNLOAD_DIR, EXTRACT_DIR, PROFILE_BASE_DIR, EVAL_DIR
+# SESSION_TTL, MAX_SESSIONS, MAX_BODY_SIZE, MAX_PDF_SIZE
+# SECRET_KEY, AUTO_LOGIN, TZ
+```
+
+### Testing
 
 ```bash
 # Run all tests
 go test ./...
 
-# Run specific package tests
-go test ./tests/config/ -v
-go test ./tests/apperror/ -v
-go test ./tests/extractor/ -v
-go test ./tests/service/ -v
-go test ./tests/fibererror/ -v
-go test ./tests/student_profile/ -v
-go test ./tests/eval/ -v
+# Run tests for specific package
+go test ./tests/student_profile/...
+go test ./tests/service/...
+go test ./tests/extractor/...
 
 # Run with verbose output
-go test ./tests/... -v
+go test -v ./...
 
-# Run specific test function
-go test ./tests/config/ -run TestLoadConfig -v
+# Run with coverage
+go test -cover ./...
 
-# Skip integration tests (those requiring PDF files)
-go test ./tests/extractor/ -run TestParseKRS -v  # Skips if no PDF available
+# Run smoke tests (requires .env.test or running server)
+node tmp/smoke-test.mjs
+go run tmp/extraction-smoke-test.go
 ```
 
-### Lint & Vet
+### Linting & Formatting
 
 ```bash
-# Static analysis
-go vet ./...
+# Format code
+gofmt -w .
 
-# Tidy dependencies
-go mod tidy
+# Lint (requires golangci-lint installation)
+golangci-lint run ./...
 ```
 
 ---
 
 ## Code Conventions & Common Patterns
 
-### File Naming
+### Dependency Injection
 
-|Convention|Example|
-|---|---|
-|Go source files|`snake_case.go` (`health_service.go`, `apperror.go`)|
-|Test files|`tests/<package>/<name>_test.go` (external packages)|
-|Package names|Single lowercase word (`config`, `entity`, `service`, `handler`, `response`)|
-|Parser files|`parser_common.go` for shared constants/helpers|
-
-### Error Handling
+Manual constructor injection in `cmd/server/main.go`. Dependencies flow top-down:
 
 ```go
-// Correct — use apperror constructors
-return apperror.BadRequest("name is required")
-return apperror.NotFound("user not found", err)      // with internal cause
-return apperror.Internal("database failed", err)      // 500 with cause
-return apperror.Unauthorized("LMS login failed")     // 401
-return apperror.Forbidden("permission denied")        // 403
-return apperror.Conflict("already exists")            // 409
+// Example: Session manager creation
+sessionMgr := session.NewManager(logger, cfg.Browser, cfg.Session, cfg.DNS)
 
-// WRONG — never do this
-c.SendStatus(400)
-c.JSON(fiber.Map{"error": "..."})
+// Example: Service wiring with interfaces
+studentProfileSvc := student_profile_service.NewService(
+    sessionMgr,           // port.SessionManager
+    scraper,              // port.StudentProfileScraper
+    photoCache,           // port.ExtractionCache
+    logger,
+    cfg.PhotoCache,
+)
 ```
 
-Handlers ALWAYS return `error`. The global `fibererror` handler processes errors.
+### Interface Segregation
 
-### Response Format
+Small, focused interfaces in `internal/domain/port/`:
 
-All endpoints use uniform JSON envelope:
-
-```json
-{
-  "status": "success|error",
-  "data": {},
-  "message": "...",
-  "errors": {}
+```go
+type BrowserSession interface {
+    Navigate(url string) error
+    Eval(js string) (json.RawMessage, error)
+    ElementAttribute(selector, attr string) (string, error)
+    ElementExists(selector string) (bool, error)
+    DownloadPDF(url string) ([]byte, error)
+    DownloadImage(url string) ([]byte, error)
+    Close() error
 }
 ```
 
-Use helpers:
+### Error Handling
+
+Custom `AppError` type with public/internal message separation:
 
 ```go
-// Correct — data should be a struct, not a string
-response.Success(c, fiber.StatusOK, result, "Service is healthy")
-response.Error(c, fiber.StatusBadRequest, "name is required")
+// Constructors for common errors
+apperr := apperror.BadRequest("NPM must be 8-12 digits")
+apperr := apperror.NotFound("Session not found")
+apperr := apperror.Internal("browser launch failed").Wrap(err)
+
+// Sentinel errors for flow control
+var ErrPDFNotFound = errors.New("PDF not found")
+var ErrExtractionNotFound = errors.New("extraction not found")
+```
+
+### Response Envelopes
+
+Standard API response structure (NOTE: envelopes are inconsistent — see Important Notes):
+
+```go
+// Success envelope
+response.Success(c, data, "optional message")
+// → { "status": "success", "data": {...}, "message": "..." }
+
+// Error envelope
+response.Error(c, http.StatusBadRequest, "error message", err)
+// → { "status": "error", "message": "...", "errors": [...] }
 ```
 
 ### Logging
 
-Use `log/slog` only — no external logging libraries:
+slog-based structured logger with environment-aware output:
 
 ```go
-// Structured key-value pairs
-log.Info("starting server", "app", cfg.App.Name, "addr", cfg.Addr())
-log.Error("failed to load config", "error", err)
+// Development: text handler, DEBUG level
+// Production: JSON handler, INFO level
+logger.Info("session created", "npm", npm, "ttl", ttl)
+logger.Error("browser launch failed", "error", err)
 ```
 
-- Development: `slog.TextHandler` at `DEBUG` level
-- Production: `slog.JSONHandler` at `INFO` level
+### NPM Validation
 
-### Configuration
+Student ID (NPM) validation rules:
+- Digits only (`^[0-9]+$`)
+- 8–12 characters long
+- Implemented in `internal/interfaces/http/handler/validateNPM`
 
-All config from environment variables with typed defaults. No hardcoding.
+### go-rod Browser Automation
 
 ```go
-cfg.App.Name       // from APP_NAME (default: "lonceng_unman_be")
-cfg.App.Env        // from APP_ENV (default: "development")
-cfg.App.Port       // from APP_PORT (default: "3000")
-cfg.App.Host       // from APP_HOST (default: "0.0.0.0")
-cfg.App.DownloadDir  // from DOWNLOAD_DIR (default: "./downloads")
-cfg.App.ExtractDir   // from EXTRACT_DIR (default: "./extracted")
-cfg.App.EvalDir      // from EVAL_DIR (default: "./eval/ground_truth")
-cfg.App.MaxSessions  // from MAX_SESSIONS (default: 15)
-cfg.App.SessionTTL   // from SESSION_TTL (default: 15m)
-cfg.App.PhotoCacheTTL// from PHOTO_CACHE_TTL (default: 15m)
-cfg.App.MaxBodySize  // from MAX_BODY_SIZE (default: 1MB)
-cfg.App.MaxPDFSize   // from MAX_PDF_SIZE (default: 50MB)
+// IMPORTANT: go-rod Eval requires arrow functions, NOT function declarations
+// Correct:
+page.Eval(`() => document.querySelector('input').value`)
+
+// Wrong:
+page.Eval(`function() { return document.querySelector('input').value }`)
+
+// Session management pattern:
+defer session.Close()        // Always close browser sessions
+defer sessionMgr.Stop()      // Always stop session manager on shutdown
 ```
 
-### Middleware Order
-
-**Strict order** — DO NOT change without understanding implications:
-
-```
-recover → requestid → logger → gzip → cors
-```
-
-- `recover` MUST be first (catches panics from all subsequent middleware)
-- `requestid` generates trace_id used by error handler and logger
-- `logger` needs the requestid for correlation
-- `gzip` applies compression before CORS headers
-- `cors` is last — headers applied after all processing
-
-### Dependency Injection
-
-Manual constructor injection in `cmd/server/main.go`. No DI framework.
+### Session Management Pattern
 
 ```go
-// Composition root pattern
-healthService := service.NewHealthService(cfg.App)
-healthHandler := handler.NewHealthHandler(healthService)
-
-// Interface-based — handlers depend on interfaces, not concrete types
-type HealthHandler struct {
-    service service.HealthChecker  // interface, not *healthService
+// Session restoration with profile directory
+session, err := sessionMgr.GetOrCreate(npm, cfg.Browser.Headless)
+if err != nil {
+    return err
 }
+defer session.Close()
+
+// DNS pre-flight check before browser operations
+// Background cleanup loop evicts expired sessions
+// Per-NPM locks prevent duplicate session creation
 ```
 
-### Fiber v3 API
+### PDF Extraction Flow
 
 ```go
-// Body parsing (Fiber v3 API — NOT v2)
-var req entity.LoginRequest
-if err := c.Bind().JSON(&req); err != nil { ... }
+// 1. Download PDF via browser automation
+pdfBytes, err := session.DownloadPDF(pdfURL)
 
-// Request body access
-body := c.Body()  // []byte
+// 2. Parse via PDFParser interface
+result, err := parser.ParseKRS(pdfBytes)
+// or
+result, err := parser.ParseKHS(pdfBytes)
 
-// NOT this (v2 API):
-// c.BodyParser(&req)  // DEPRECATED in v3
-```
-
-### Compile-Time Interface Checks
-
-```go
-var _ service.HealthChecker = service.NewHealthService(cfg)
+// 3. Cache extracted JSON
+cache.Set(npm, jsonBytes)
 ```
 
 ---
@@ -390,116 +302,77 @@ var _ service.HealthChecker = service.NewHealthService(cfg)
 
 ### Entry Points
 
-|File|Purpose|
-|---|---|
-|`cmd/server/main.go`|Application entry point, DI wiring, Fiber app setup|
-|`internal/interfaces/http/router/router.go`|All route definitions (12 routes)|
-|`internal/config/config.go`|Config struct with env loading, validation, typed defaults|
+| File | Purpose |
+|------|---------|
+| `cmd/server/main.go` | Main server entry point, DI wiring, route registration |
+| `cmd/extractor/main.go` | CLI for raw PDF text extraction (debugging) |
 
 ### Configuration
 
-|File|Purpose|
-|---|---|
-|`.env`|Active environment variables (gitignored)|
-|`.env.example`|Template env vars with comments (tracked)|
-|`internal/config/config.go`|Config struct, validation, env parsing|
-|`go.mod`|Go module definition and dependencies|
-|`run.cmd`|Windows build-and-run script|
-|`Dockerfile`|Multi-stage Docker build (Go builder → Alpine + Chromium runtime)|
-|`compose.yml`|Docker Compose configuration for production deployment|
-|`.dockerignore`|Docker build context exclusions|
+| File | Purpose |
+|------|---------|
+| `.env.example` | Complete environment variable template (24 vars) |
+| `.env` | Development environment configuration |
+| `.env.test` | Test environment for smoke tests |
+| `internal/config/config.go` | Config loading, validation, path resolution |
+
+### Core Domain
+
+| File | Purpose |
+|------|---------|
+| `internal/domain/entity/extraction.go` | KRS/KHS extraction entities |
+| `internal/domain/entity/student_profile.go` | Student profile entity (55+ fields) |
+| `internal/domain/port/browser.go` | BrowserSession interface |
+| `internal/domain/port/session.go` | SessionManager interface |
+| `internal/domain/port/extraction.go` | PDFParser and ExtractionCache interfaces |
+
+### Infrastructure
+
+| File | Purpose |
+|------|---------|
+| `internal/infrastructure/browser/browser.go` | go-rod browser wrapper with Connect/ConnectWithProfile |
+| `internal/infrastructure/browser/scraper.go` | Student profile scraper with bulk JS eval |
+| `internal/infrastructure/session/manager.go` | Session manager with TTL eviction and per-NPM locks |
+| `internal/infrastructure/extractor/krs.go` | KRS PDF parser |
+| `internal/infrastructure/extractor/khs.go` | KHS PDF parser |
+| `internal/infrastructure/photocache/cache.go` | TTL-based photo cache with compression |
+
+### Application Services
+
+| File | Purpose |
+|------|---------|
+| `internal/application/service/lms_service.go` | LMS login validation |
+| `internal/application/service/extraction_service.go` | PDF extraction orchestration |
+| `internal/application/service/student_profile_service.go` | Student profile scraping with photo cache |
+| `internal/application/service/eval_service.go` | Evaluation metrics (TP/FN/FP/TN, Precision, Recall, F1) |
+
+### HTTP Layer
+
+| File | Purpose |
+|------|---------|
+| `internal/interfaces/http/handler/` | 8 HTTP handlers |
+| `internal/interfaces/http/response/response.go` | Success/Error response envelopes |
+| `internal/infrastructure/middleware/middleware.go` | Auth, CORS, logging middleware |
+| `internal/infrastructure/fibererror/handler.go` | Global error handler |
+
+### Tests
+
+| File | Purpose |
+|------|---------|
+| `tests/student_profile/handler_test.go` | Student profile handler tests |
+| `tests/student_profile/service_test.go` | Student profile service tests |
+| `tests/extractor/krs_parser_test.go` | KRS parser tests |
+| `tests/extractor/khs_parser_test.go` | KHS parser tests |
+| `tests/service/eval_service_test.go` | Eval service tests |
+| `tests/infrastructure/auth/middleware_test.go` | Auth middleware tests |
 
 ### Documentation
 
-|File|Purpose|
-|---|---|
-|`README.md`|Project README (Indonesian)|
-|`docs/architecture/`|UML diagrams (use case, class, statechart, sequence, robustness)|
-|`docs/api/`|API documentation per endpoint (12 files) + DATA_TYPES, ENVIRONMENT, ERROR_HANDLING, FOLDER_STRUCTURE|
-|`docs/flow-docs/KRS_PARSER_FLOW.md`|KRS extraction pipeline documentation|
-|`docs/flow-docs/PDF_PARSER_FLOW.md`|8-phase PDF parser pipeline|
-|`docs/flow-docs/SESSION_CACHE_RECOMMENDATION.md`|Chrome profile persistence design|
-|`docs/superpowers/plans/`|Implementation plans (7 feature evolution docs)|
-|`docs/superpowers/specs/`|Design specs (KHS dedup fix)|
-
----
-
-## Runtime/Tooling Preferences
-
-### Required Runtime
-
-- **Go 1.26.4** — module requires this version
-- **Windows 10 Pro** — host OS for development and production
-- **Git Bash (MSYS2)** — shell for commands (NOT WSL, NOT PowerShell, NOT cmd)
-- **Docker Desktop** — container runtime for development and production
-- **Chrome/Chromium** — required for go-rod browser automation (installed in container)
-
-### Dependencies
-
-|Package|Version|Purpose|
-|---|---|---|
-|`gofiber/fiber/v3`|v3.4.0|HTTP framework|
-|`go-rod/rod`|v0.116.2|Headless Chrome automation|
-|`razvandimescu/gopdf`|v0.9.5|PDF generation (used for extraction)|
-|`joho/godotenv`|v1.5.1|.env file loading|
-
-### Package Manager
-
-- **Go modules** — standard Go dependency management
-- No vendoring — dependencies downloaded to module cache
-
-### Build Tools
-
-- `go build` — standard Go build
-- `run.cmd` — Windows batch script for build + run
-- `docker build` — multi-stage Docker build (Go builder → Alpine + Chromium runtime)
-- `docker compose` — production deployment orchestration
-
-### Environment Variables (22+)
-
-Key variables from `.env.example`:
-
-```bash
-# Server
-APP_NAME=lonceng_unman_be
-APP_ENV=development
-APP_PORT=3000
-APP_HOST=0.0.0.0
-
-# LMS
-LMS_BASE_URL=https://elearning.universitasmandiri.ac.id
-LMS_DASHBOARD_URL=https://elearning.universitasmandiri.ac.id/admin/
-
-# Browser
-BROWSER_HEADLESS=true
-BROWSER_TIMEOUT=60s
-DNS_TIMEOUT=5s
-
-# Paths
-DOWNLOAD_DIR=./downloads
-EXTRACT_DIR=./extracted
-EVAL_DIR=./eval/ground_truth
-PROFILE_BASE_DIR=./profiles
-
-# Session
-SESSION_TTL=15m
-MAX_SESSIONS=15
-
-# Photo Cache
-PHOTO_CACHE_TTL=15m
-
-# Limits
-MAX_BODY_SIZE=1MB
-MAX_PDF_SIZE=50MB
-
-# CORS
-CORS_ALLOW_ORIGINS=*
-CORS_ALLOW_METHODS=GET,POST,OPTIONS
-CORS_ALLOW_HEADERS=Content-Type
-
-# Timezone
-TZ=Asia/Jakarta
-```
+| File | Purpose |
+|------|---------|
+| `README.md` | Project overview, quick start, API endpoints |
+| `docs/api/` | 16 API endpoint documentation files |
+| `docs/architecture/` | Architecture diagrams and flow documentation |
 
 ---
 
@@ -507,340 +380,220 @@ TZ=Asia/Jakarta
 
 ### Test Framework
 
-- **stdlib `testing` only** — no testify, no gomock, no external test frameworks
-- **Fiber's built-in `app.Test()`** — for HTTP handler integration tests
-- **Table-driven tests** — preferred pattern for multiple test cases
-- **Subtests** — `t.Run("name", func(t *testing.T) { ... })` for organized cases
+- **Standard library**: `testing` package exclusively (no testify, no mockery)
+- **HTTP testing**: Fiber's built-in `app.Test()` method
+- **Mocking**: Manual mocks via function-field structs
 
-### Test Organization (14 files, 8 packages)
+### Test Organization
+
+Tests live in a top-level `tests/` directory organized by feature:
 
 ```
 tests/
-├── config/config_test.go                  ← Config loading, validation, env parsing
-├── logger/logger_test.go                  ← Logger creation per environment
-├── apperror/apperror_test.go              ← Error constructors, errors.As/unwrapping
-├── service/
-│   ├── health_service_test.go             ← HealthService.Check() + interface compliance
-│   └── eval_service_test.go              ← Course matching logic (MatchCourses, CompareFields)
-├── fibererror/handler_test.go             ← Fiber error handler integration tests
-├── extractor/
-│   ├── parse_header_test.go               ← NormalizeLabel with table-driven subtests
-│   ├── khs_parser_test.go                 ← KHS parsing with conditional integration
-│   └── krs_parser_test.go                 ← KRS parsing with conditional integration
-├── student_profile/
-│   ├── handler_test.go                    ← StudentProfile HTTP handler tests (scrape, get, photo)
-│   ├── service_test.go                    ← StudentProfile service tests with mocks
-│   └── entity_test.go                     ← Student profile entity JSON tests
-└── eval/
-    ├── handler_test.go                    ← Eval handler tests (Index, Student, EditKRS, EditKHS, SaveKRS, SaveKHS)
-    └── preview_test.go                    ← PDF preview integration tests with t.TempDir()
-```
-
-### Test Naming Convention
-
-```go
-func TestFunctionName_Behavior(t *testing.T) {
-    // Examples:
-    func TestLoadConfig_ValidEnv(t *testing.T) { ... }
-    func TestParseKHS_FileNotFound(t *testing.T) { ... }
-    func TestNotFound(t *testing.T) { ... }
-    func TestNew_ValidConfig(t *testing.T) { ... }
-    func TestScrape_EmptyNPM(t *testing.T) { ... }
-}
-```
-
-### Running Tests
-
-```bash
-# All tests
-go test ./...
-
-# Specific package with verbose output
-go test ./tests/config/ -v
-go test ./tests/extractor/ -v
-go test ./tests/student_profile/ -v
-
-# Specific test function
-go test ./tests/config/ -run TestLoadConfig -v
-
-# Skip integration tests (those requiring PDF files)
-go test ./tests/extractor/ -run TestParseKRS -v  # Skips if no PDF available
+  student_profile/
+    handler_test.go      ← HTTP handler tests
+    service_test.go      ← Service layer tests
+    entity_test.go       ← Entity serialization tests
+  handler/
+    auth_handler_test.go ← Auth handler tests
+  service/
+    eval_service_test.go ← Eval service tests
+    health_service_test.go
+  extractor/
+    krs_parser_test.go   ← KRS parser tests
+    khs_parser_test.go   ← KHS parser tests
+    split_tahun_test.go  ← Year splitting tests
+    parse_header_test.go ← Header normalization tests
+  config/
+    config_test.go       ← Config loading tests
+  infrastructure/
+    auth/
+      middleware_test.go ← Auth middleware tests
+  eval/
+    handler_test.go      ← Eval handler tests
+    preview_test.go      ← PDF preview tests
+  fibererror/
+    handler_test.go      ← Error handler tests
+  logger/
+    logger_test.go       ← Logger tests
+  apperror/
+    apperror_test.go     ← AppError constructor tests
 ```
 
 ### Test Patterns
 
-```go
-// Table-driven test example
-func TestNormalizeLabel(t *testing.T) {
-    tests := []struct {
-        name     string
-        input    string
-        expected string
-    }{
-        {"lowercase", "nama", "Nama"},
-        {"uppercase", "NAMA", "Nama"},
-        {"mixed", "No.", "No."},
-    }
+**Manual Mock Pattern** (function-field structs):
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            result := extractor.NormalizeLabel(tt.input)
-            if result != tt.expected {
-                t.Errorf("NormalizeLabel(%q) = %q, want %q", tt.input, result, tt.expected)
-            }
-        })
-    }
+```go
+type mockStudentProfileService struct {
+    scrapeFn func(npm string) (*entity.StudentProfile, error)
+    getFn    func(npm string) (*entity.StudentProfile, error)
+}
+
+func (m *mockStudentProfileService) Scrape(npm string) (*entity.StudentProfile, error) {
+    return m.scrapeFn(npm)
+}
+
+func (m *mockStudentProfileService) Get(npm string) (*entity.StudentProfile, error) {
+    return m.getFn(npm)
 }
 ```
 
+**Test App Helper**:
+
 ```go
-// Integration test with skip pattern
-func TestParseKHS(t *testing.T) {
-    pdfPath := "../../downloads/test_khs.pdf"
-    if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
-        t.Skip("PDF file not found, skipping integration test")
-    }
-    // ... test implementation
+// newTestApp creates a Fiber app with mocked dependencies for HTTP testing
+app := newTestApp(mockService)
+req := httptest.NewRequest(http.MethodPost, "/api/v1/lms/student-profile", body)
+req.Header.Set("Content-Type", "application/json")
+resp, err := app.Test(req)
+```
+
+**Table-Driven Subtests**:
+
+```go
+tests := []struct {
+    name     string
+    input    string
+    expected string
+}{
+    {"underscore format", "2020_2021", "2020/2021"},
+    {"slash format", "2020/2021", "2020/2021"},
+}
+for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+        result := splitTahunAjaran(tt.input)
+        require.Equal(t, tt.expected, result)
+    })
 }
 ```
 
-```go
-// Fiber handler test with app.Test()
-func TestHealthHandler(t *testing.T) {
-    app := fiber.New()
-    handler.RegisterRoutes(app, healthHandler)
+### Test Helpers
 
-    req := httptest.NewRequest("GET", "/api/v1/health", nil)
-    resp, err := app.Test(req)
-    if err != nil {
-        t.Fatalf("app.Test() failed: %v", err)
-    }
+- `newTestApp()` — Creates Fiber app with mocked services
+- `newTestService()` — Creates service with mocked dependencies
+- `newTestConfig()` — Creates test config
+- `jsonBody()` — Creates JSON request body
+- `readBody()` — Reads and unmarshals response body
+- `captureLogger()` — Captures logger output to bytes.Buffer
+- `newAuthTestHandler()` — Creates auth handler with test config
 
-    if resp.StatusCode != fiber.StatusOK {
-        t.Errorf("expected status 200, got %d", resp.StatusCode)
-    }
-}
-```
+### Coverage
 
-```go
-// Mock pattern (manual, no gomock)
-type mockCache struct {
-    getFn func(key string) ([]byte, error)
-    setFn func(key string, data []byte) error
-}
-
-func (m *mockCache) Get(key string) ([]byte, error) { return m.getFn(key) }
-func (m *mockCache) Set(key string, data []byte) error { return m.setFn(key, data) }
-```
-
-### Coverage Expectations
-
-- **Unit tests** for all service methods and handlers
-- **Integration tests** for HTTP endpoints using `app.Test()`
-- **Parser tests** with conditional skip (require PDF fixtures)
-- **Regression tests** for edge cases (deduplication, boundary conditions)
-- Run `go vet ./...` before commits — catches common issues
-
-### Known Test Gaps
-
-- No tests for `cmd/server/main.go` (New has no covering tests)
-- No tests for `internal/infrastructure/evalstore`
-- Extractor tests are no-ops without testdata fixtures (directory is empty)
-- No tests for photocache, session manager infrastructure implementations
-- No tests for middleware (CORS, auth, etc.)
-- No benchmark tests
-- No concurrent/parallel execution tests
+- No coverage tooling configured by default
+- Run with: `go test -cover ./...`
+- No enforced coverage thresholds
 
 ---
 
-## Git Conventions
+## Runtime & Tooling Preferences
 
-### Commit Format
+### Required Runtime
 
-Conventional Commits — `type(scope): description`
+- **Go**: 1.26.4+ (module version)
+- **Node.js**: Required for tmp/ utility scripts (smoke tests, Mermaid rendering)
+- **Package Manager**: Go modules (go mod)
+- **OS**: Windows 10 / WSL2 / Linux
+
+### Package Manager
+
+- Go modules only (`go mod tidy`, `go mod download`)
+- No vendoring
+- Node.js dependencies in `tmp/package.json` for utility scripts
+
+### Tooling Constraints
+
+- **Shell**: Git Bash (MSYS2) on Windows. Use Git-MSYS2-compatible commands, paths, and quoting
+- **Paths**: Windows-style paths; use Git Bash-compatible forms
+- **Avoid**: Linux-only tools or pure PowerShell unless requested
+- **TMPDIR**: Must be appuser-owned in Docker (for Chromium temp files)
+- **Browser Timeout**: Minimum 60s for cold starts (`BROWSER_TIMEOUT=60s`)
+
+### Docker Runtime
+
+- Multi-stage build: `golang:1.26.4-alpine` → `alpine:3.20`
+- Runtime includes Chromium, nss, freetype, harfbuzz, font-noto
+- Non-root `appuser` execution
+- `cap_drop ALL`, `cap_add SYS_ADMIN` security hardening
+- `tmpfs 512M`, `shm_size 1gb` for Chromium
+- Healthcheck on `/api/v1/health`
+
+---
+
+## Important Notes
+
+### Known Inconsistencies
+
+1. **Response Envelopes**: Inconsistent shapes across handlers
+   - `response.Success()` → `{status, data, message}`
+   - `response.Error()` → `{status, message, errors}` (no trace_id)
+   - `fibererror.New()` → `{status, message, trace_id, errors}`
+   - `eval_handler.StudentList` → `{status, data}` (missing message)
+   - `auth_handler` → returns HTML, not JSON
+
+2. **Login Endpoint**: Returns HTTP 200 for both credential success and failure (distinguished by `data.success` boolean)
+
+3. **Before msgpack migration**: Response envelopes should be unified
+
+### go-rod Eval Rules
+
+- **MUST use arrow functions**, NOT function declarations
+- Correct: `page.Eval(`() => document.querySelector('input').value`)`
+- Wrong: `page.Eval(`function() { return ... }`)`
+
+### Session Management
+
+- Always `defer session.Close()` after obtaining a session
+- Always `defer sessionMgr.Stop()` on application shutdown
+- Sessions are keyed by NPM with per-NPM locks
+- TTL-based eviction with background cleanup loop
+
+### NPM Validation Rules
+
+- Digits only (`^[0-9]+$`)
+- 8–12 characters long
+- Implemented in `internal/interfaces/http/handler/validateNPM`
+
+### Image Handling
+
+- HTTP gzip does NOT compress JPEGs — use image-level compression
+- Photos are cached with TTL-based eviction in `internal/infrastructure/photocache/`
+
+### Git Conventions
+
+- `.gitignore` excludes: binaries, `.env`, IDE files, OS files, vendor, logs, `.codegraph`, `.omp`, `.superpowers`
+- `AGENTS.md` is gitignored — use `git add -f AGENTS.md` to track it
+
+### Documentation Status
+
+- ✅ Comprehensive README.md
+- ✅ 16 API docs in `docs/api/`
+- ✅ Architecture diagrams in `docs/architecture/`
+- ❌ No CLAUDE.md or .cursorrules
+- ❌ No OpenAPI/Swagger specs
+- ❌ No CI/CD pipelines configured
+- ❌ No linting configuration (.golangci.yml)
+
+---
+
+## Quick Reference
 
 ```bash
-feat(config): add port range validation
-fix(extractor): correct KHS column boundary
-refactor(session): simplify lock acquisition
-test(apperror): add NotFound unwrapping test
-docs(api): update endpoint documentation
-chore(deps): update go-rod to v0.116.2
+# Start development server
+go run cmd/server/main.go
+
+# Run all tests
+go test ./...
+
+# Build for production
+go build -o bin/server.exe cmd/server/main.go
+
+# Docker build and run
+docker build -t lonceng_unman_be . && docker compose up -d
+
+# View logs
+docker compose logs -f lonceng-api
+
+# Health check
+curl http://localhost:3000/api/v1/health
 ```
-
-### Branch Naming
-
-```bash
-feat/<feature-name>    # e.g., feat/session-persistence
-fix/<bug-description>  # e.g., fix/khs-dedup-error
-```
-
-### Commit Rules
-
-- **Every code change** MUST be committed immediately
-- **No force push** to shared branches
-- **No merge** without explicit user command
-- **All code and comments** in English
-- **Documentation** in Indonesian (Bahasa Indonesia)
-
----
-
-## Common Pitfalls
-
-1. **Fiber v3 API** — Use `c.Bind().JSON()`, NOT `c.BodyParser()` (v2 API)
-2. **Error handling** — Always return `apperror.*` from handlers, NEVER `c.SendStatus()`
-3. **Response envelope** — Always use `response.Success()` / `response.Error()`, NEVER raw JSON
-4. **Logging** — Use `log/slog` only, no external logging libraries
-5. **Config** — All values from env vars, no hardcoding
-6. **Middleware order** — Strict: recover → requestid → logger → gzip → cors
-7. **Windows paths** — Use forward slashes in Go code, quote paths with spaces
-8. **go-rod** — Use non-Must methods (return errors) in production code
-9. **go-rod Eval** — Requires async function expressions `async () => {}`, NOT IIFEs or arrow function declarations
-10. **Browser timeout** — `BROWSER_TIMEOUT=60s` minimum for cold starts
-11. **TMPDIR** — Must be appuser-owned (go-rod leakless requirement)
-12. **Session lifecycle** — Always `defer session.Close()` and `defer sessionMgr.Stop()`
-13. **Photo compression** — HTTP gzip doesn't compress JPEGs — use image-level compression (`photocache.CompressPhoto`)
-14. **AGENTS.md is gitignored** — Use `git add -f AGENTS.md` to track it
-15. **NPM validation** — Digits only (`^[0-9]+$`), 8-12 chars (defined in `document_handler.go`)
-16. **Response envelope inconsistency** — `Status` field uses string "success"/"error"; flagged for unification before msgpack migration
-17. **LICENSE inconsistency** — README badge says MIT but LICENSE file is The Unlicense
-
----
-
-## API Endpoints (12 total)
-
-|Method|Path|Handler|Description|
-|---|---|---|---|
-|`GET`|`/api/v1/health`|HealthHandler.Check|Health check|
-|`POST`|`/api/v1/lms/login`|LMSHandler.Login|LMS login|
-|`POST`|`/api/v1/lms/krs`|DocumentHandler.DownloadKRS|Download KRS PDF|
-|`POST`|`/api/v1/lms/khs/semesters`|DocumentHandler.GetKHSSemesters|Get KHS semesters|
-|`POST`|`/api/v1/lms/khs`|DocumentHandler.DownloadKHS|Download KHS PDF|
-|`POST`|`/api/v1/lms/krs/extract`|ExtractionHandler.ExtractKRS|Extract KRS from PDF|
-|`POST`|`/api/v1/lms/khs/extract`|ExtractionHandler.ExtractKHS|Extract KHS from PDF|
-|`POST`|`/api/v1/lms/krs/data`|ExtractionHandler.GetKRS|Get cached KRS data|
-|`POST`|`/api/v1/lms/khs/data`|ExtractionHandler.GetKHS|Get cached KHS data|
-|`POST`|`/api/v1/lms/student-profile`|StudentProfileHandler.Scrape|Scrape student profile|
-|`POST`|`/api/v1/lms/student-profile/data`|StudentProfileHandler.Get|Get cached profile data|
-|`POST`|`/api/v1/lms/student-profile/photo`|StudentProfileHandler.GetPhoto|Get student photo|
-
-Additional eval endpoints (HTML pages + JSON APIs):
-- `GET /eval/` — Evaluation dashboard index
-- `GET /eval/:npm` — Per-student evaluation
-- `GET /eval/:npm/krs/:file` — KRS page
-- `GET /eval/:npm/khs/:file` — KHS page
-- `POST /eval/:npm/krs/:file` — Save KRS ground truth
-- `POST /eval/:npm/khs/:file` — Save KHS ground truth
-- `GET /eval/api/student-list` — Student list JSON
-- `POST /eval/api/auto-extract/krs` — Auto-extract KRS
-- `POST /eval/api/auto-extract/khs` — Auto-extract KHS
-
----
-
-## Session Management
-
-- **In-memory cache** with configurable TTL (default: 15 minutes)
-- **Maximum concurrent sessions** configurable (default: 15)
-- **Chrome profile persistence** — sessions survive server restarts via `PROFILE_BASE_DIR`
-- **DNS pre-flight** — validates LMS reachability before browser connection
-- **Background cleanup** — expired sessions removed automatically
-- **Per-NPM locking** — prevents concurrent operations on same student
-- **Photo cache** — student photos cached with configurable TTL + JSON metadata
-
----
-
-## Key Interfaces
-
-### BrowserSession (`internal/domain/port/browser.go`)
-
-```go
-type BrowserSession interface {
-    Navigate(url string) error
-    Eval(js string) (string, error)
-    ElementAttribute(selector, attr string) (string, error)
-    ElementExists(selector string) (bool, error)
-    ElementHref(selector string) (string, error)
-    DownloadPDF(url, savePath string) (string, int, error)
-    DownloadImage(url, savePath string) (string, int, error)
-    Close() error
-}
-```
-
-### SessionManager (`internal/domain/port/session.go`)
-
-```go
-type SessionManager interface {
-    GetOrCreate(npm, password string) (BrowserSession, error)
-    Close(npm string) error
-    CloseAll()
-}
-```
-
-### PDFParser (`internal/domain/port/extraction.go`)
-
-```go
-type PDFParser interface {
-    ParseKRS(path string, npm string) (*entity.KRSExtraction, error)
-    ParseKHS(path string, npm string, tahunAjaran string, semester string) (*entity.KHSExtraction, error)
-    MarshalToJSON(v interface{}) ([]byte, error)
-}
-```
-
-### ExtractionCache (`internal/domain/port/extraction.go`)
-
-```go
-type ExtractionCache interface {
-    Get(npm, docType, filename string) ([]byte, error)
-    Set(npm, docType, filename string, data []byte) error
-    Exists(npm, docType, filename string) bool
-    GetModTime(npm, docType, filename string) (time.Time, error)
-    Invalidate(npm, docType, filename string) error
-}
-```
-
-### StudentProfileScraper (`internal/domain/port/student_profile_scraper.go`)
-
-```go
-type StudentProfileScraper interface {
-    Scrape(session BrowserSession, lmsBaseURL string) (*entity.StudentProfile, error)
-}
-```
-
-### EvalStore (`internal/domain/port/eval.go`)
-
-```go
-type EvalStore interface {
-    ListNPMs() ([]string, error)
-    ListDocs(npm string) ([]entity.NPMDoc, error)
-    LoadGT(npm, docType, filename string) ([]byte, error)
-    LoadExtract(npm, docType, filename string) ([]byte, error)
-    WriteGT(npm, docType, filename string, data []byte) error
-    Exists(npm, docType, filename string) (bool, bool, error)
-}
-```
-
----
-
-## PDF Extraction Pipeline
-
-```
-PDF file
-  → ReadPDFWithPosition()     ← Extract text spans with X,Y positions from PDF
-  → RowsToLines()             ← Group PDFRows into logical lines
-  → FindColumnPositions()     ← Detect column boundaries from header alignment
-  → SmartWordSplit()          ← Split merged words at column boundaries
-  → parseKRSMataKuliah()     ← Extract KRS course data (code, name, SKS, schedule)
-  → parseKHSMataKuliah()     ← Extract KHS grade data (code, name, grade, SKS, etc.)
-  → Deduplication             ← Remove duplicate entries (KHS-specific)
-  → JSON output               ← Marshal to structured JSON
-```
-
-**Position-based extraction** — uses PDF text span coordinates (X,Y) rather than text pattern matching. Y-axis is flipped (PDF origin at bottom, screen origin at top). Words are grouped by Y position into rows, then sorted by X position within each row.
-
----
-
-## License
-
-**The Unlicense** — Public domain dedication
-
-> **Note:** README badge says MIT but LICENSE file is The Unlicense (inconsistency).
