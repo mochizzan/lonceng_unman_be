@@ -105,70 +105,85 @@
                     </div>
                     {{end}}
 
-                    {{range .KRSDocs}}
-                    <div class="doc-section card card-interactive border-0 shadow-sm mb-3" data-semester="{{.Semester}}">
+                    {{range $idx, $doc := .KRSDocs}}
+                    <div class="doc-section card card-interactive border-0 shadow-sm mb-3" data-semester="{{$doc.Semester}}">
                         <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
-                            <h5 class="mb-0 fw-semibold"><i class="bi bi-file-earmark-text"></i> KRS Semester {{.Semester}}</h5>
-                            <span class="badge bg-secondary-subtle text-secondary-emphasis">{{.File}}</span>
+                            <h5 class="mb-0 fw-semibold"><i class="bi bi-file-earmark-text"></i> KRS Semester {{$doc.Semester}}</h5>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis">{{$doc.File}}</span>
+                                {{if $doc.Paired}}
+                                <button class="btn btn-sm btn-link compare-toggle collapsed"
+                                        type="button"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#compareKRS-{{$idx}}"
+                                        aria-expanded="false"
+                                        aria-controls="compareKRS-{{$idx}}"
+                                        title="Tampilkan/Sembunyikan tabel perbandingan">
+                                    <i class="bi bi-chevron-down"></i>
+                                </button>
+                                {{end}}
+                            </div>
                         </div>
                         <div class="card-body">
-                            {{if .Paired}}
+                            {{if $doc.Paired}}
                             <div class="d-flex flex-wrap gap-2 mb-3">
-                                <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-bullseye"></i> TP: <strong>{{.Metrics.Confusion.TP}}</strong></span>
-                                <span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-x-lg"></i> FN: <strong>{{.Metrics.Confusion.FN}}</strong></span>
-                                <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-lg"></i> FP: <strong>{{.Metrics.Confusion.FP}}</strong></span>
-                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-check-lg"></i> TN: <strong>{{.Metrics.Confusion.TN}}</strong></span>
-                                <span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-percent"></i> P: <strong>{{printf "%.2f" .Metrics.Precision}}</strong></span>
-                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-bar-chart"></i> R: <strong>{{printf "%.2f" .Metrics.Recall}}</strong></span>
-                                <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-speedometer2"></i> F1: <strong>{{printf "%.2f" .Metrics.F1}}</strong></span>
+                                <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-bullseye"></i> TP: <strong>{{$doc.Metrics.Confusion.TP}}</strong></span>
+                                <span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-x-lg"></i> FN: <strong>{{$doc.Metrics.Confusion.FN}}</strong></span>
+                                <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-lg"></i> FP: <strong>{{$doc.Metrics.Confusion.FP}}</strong></span>
+                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-check-lg"></i> TN: <strong>{{$doc.Metrics.Confusion.TN}}</strong></span>
+                                <span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-percent"></i> P: <strong>{{printf "%.2f" $doc.Metrics.Precision}}</strong></span>
+                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-bar-chart"></i> R: <strong>{{printf "%.2f" $doc.Metrics.Recall}}</strong></span>
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-speedometer2"></i> F1: <strong>{{printf "%.2f" $doc.Metrics.F1}}</strong></span>
                             </div>
 
-                            <h6 class="fw-semibold"><i class="bi bi-list-columns-reverse"></i> Compare Table</h6>
-                            <div class="table-responsive">
-                                <table class="table table-hover table-striped table-sm mb-0">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th>Field</th>
-                                            <th>Ground Truth</th>
-                                            <th>Extract</th>
-                                            <th class="text-center">Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {{range .CompareRows}}
-                                        <tr class="row-{{.Status}}">
-                                            <td>{{.Field}}</td>
-                                            <td>{{.GT}}</td>
-                                            <td>{{.Pred}}</td>
-                                            <td class="text-center">
-                                                {{if eq .Status "correct"}}<span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-circle-fill"></i> Correct</span>
-                                                {{else if eq .Status "wrong"}}<span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-x-circle-fill"></i> Wrong</span>
-                                                {{else if eq .Status "missing"}}<span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill"></i> Missing</span>
-                                                {{else if eq .Status "extra"}}<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-plus-circle-fill"></i> Extra</span>{{end}}
-                                            </td>
-                                        </tr>
-                                        {{end}}
-                                    </tbody>
-                                </table>
+                            <div class="collapse" id="compareKRS-{{$idx}}">
+                                <h6 class="fw-semibold"><i class="bi bi-list-columns-reverse"></i> Compare Table</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-hover table-striped table-sm mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Field</th>
+                                                <th>Ground Truth</th>
+                                                <th>Extract</th>
+                                                <th class="text-center">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {{range $doc.CompareRows}}
+                                            <tr class="row-{{.Status}}">
+                                                <td>{{.Field}}</td>
+                                                <td>{{.GT}}</td>
+                                                <td>{{.Pred}}</td>
+                                                <td class="text-center">
+                                                    {{if eq .Status "correct"}}<span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-circle-fill"></i> Correct</span>
+                                                    {{else if eq .Status "wrong"}}<span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-x-circle-fill"></i> Wrong</span>
+                                                    {{else if eq .Status "missing"}}<span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill"></i> Missing</span>
+                                                    {{else if eq .Status "extra"}}<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-plus-circle-fill"></i> Extra</span>{{end}}
+                                                </td>
+                                            </tr>
+                                            {{end}}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                             {{else}}
                             <div class="text-center py-4 bg-body-tertiary rounded border">
                                 <i class="bi bi-exclamation-circle display-4 text-warning"></i>
-                                <p class="text-body-secondary mt-2 mb-3">{{if .HasExtract}}Perlu GT{{else if .HasGT}}Perlu Extract{{else}}Belum Digunakan{{end}}</p>
+                                <p class="text-body-secondary mt-2 mb-3">{{if $doc.HasExtract}}Perlu GT{{else if $doc.HasGT}}Perlu Extract{{else}}Belum Digunakan{{end}}</p>
                                 <div class="d-flex flex-wrap gap-2 justify-content-center">
-                                    {{if not .HasExtract}}
+                                    {{if not $doc.HasExtract}}
                                     <button class="btn btn-primary extract-btn"
                                             data-npm="{{$.NPM}}"
                                             data-doctype="krs"
-                                            data-file="{{.File}}"
-                                            {{if not .HasRaw}}disabled{{end}}>
+                                            data-file="{{$doc.File}}"
+                                            {{if not $doc.HasRaw}}disabled{{end}}>
                                         <i class="bi bi-magic"></i> Extract Data
                                     </button>
-                                    {{if not .HasRaw}}
+                                    {{if not $doc.HasRaw}}
                                     <span class="text-muted small align-self-center">PDF belum diunduh</span>
                                     {{end}}
                                     {{end}}
-                                    <a href="/eval/{{$.NPM}}/krs/{{.File}}/edit" class="btn btn-success {{if not .HasExtract}}disabled{{end}}">
+                                    <a href="/eval/{{$.NPM}}/krs/{{$doc.File}}/edit" class="btn btn-success {{if not $doc.HasExtract}}disabled{{end}}">
                                         <i class="bi bi-plus-lg"></i> Buat GT
                                     </a>
                                 </div>
@@ -219,70 +234,85 @@
                     </div>
                     {{end}}
 
-                    {{range .KHSDocs}}
-                    <div class="doc-section card card-interactive border-0 shadow-sm mb-3" data-tahun="{{.TahunAjaran}}">
+                    {{range $idx, $doc := .KHSDocs}}
+                    <div class="doc-section card card-interactive border-0 shadow-sm mb-3" data-tahun="{{$doc.TahunAjaran}}">
                         <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
-                            <h5 class="mb-0 fw-semibold"><i class="bi bi-file-earmark-text"></i> KHS {{.TahunAjaran}}</h5>
-                            <span class="badge bg-secondary-subtle text-secondary-emphasis">{{.File}}</span>
+                            <h5 class="mb-0 fw-semibold"><i class="bi bi-file-earmark-text"></i> KHS {{$doc.TahunAjaran}}</h5>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis">{{$doc.File}}</span>
+                                {{if $doc.Paired}}
+                                <button class="btn btn-sm btn-link compare-toggle collapsed"
+                                        type="button"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#compareKHS-{{$idx}}"
+                                        aria-expanded="false"
+                                        aria-controls="compareKHS-{{$idx}}"
+                                        title="Tampilkan/Sembunyikan tabel perbandingan">
+                                    <i class="bi bi-chevron-down"></i>
+                                </button>
+                                {{end}}
+                            </div>
                         </div>
                         <div class="card-body">
-                            {{if .Paired}}
+                            {{if $doc.Paired}}
                             <div class="d-flex flex-wrap gap-2 mb-3">
-                                <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-bullseye"></i> TP: <strong>{{.Metrics.Confusion.TP}}</strong></span>
-                                <span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-x-lg"></i> FN: <strong>{{.Metrics.Confusion.FN}}</strong></span>
-                                <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-lg"></i> FP: <strong>{{.Metrics.Confusion.FP}}</strong></span>
-                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-check-lg"></i> TN: <strong>{{.Metrics.Confusion.TN}}</strong></span>
-                                <span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-percent"></i> P: <strong>{{printf "%.2f" .Metrics.Precision}}</strong></span>
-                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-bar-chart"></i> R: <strong>{{printf "%.2f" .Metrics.Recall}}</strong></span>
-                                <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-speedometer2"></i> F1: <strong>{{printf "%.2f" .Metrics.F1}}</strong></span>
+                                <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-bullseye"></i> TP: <strong>{{$doc.Metrics.Confusion.TP}}</strong></span>
+                                <span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-x-lg"></i> FN: <strong>{{$doc.Metrics.Confusion.FN}}</strong></span>
+                                <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-lg"></i> FP: <strong>{{$doc.Metrics.Confusion.FP}}</strong></span>
+                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-check-lg"></i> TN: <strong>{{$doc.Metrics.Confusion.TN}}</strong></span>
+                                <span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-percent"></i> P: <strong>{{printf "%.2f" $doc.Metrics.Precision}}</strong></span>
+                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-bar-chart"></i> R: <strong>{{printf "%.2f" $doc.Metrics.Recall}}</strong></span>
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-speedometer2"></i> F1: <strong>{{printf "%.2f" $doc.Metrics.F1}}</strong></span>
                             </div>
 
-                            <h6 class="fw-semibold"><i class="bi bi-list-columns-reverse"></i> Compare Table</h6>
-                            <div class="table-responsive">
-                                <table class="table table-hover table-striped table-sm mb-0">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th>Field</th>
-                                            <th>Ground Truth</th>
-                                            <th>Extract</th>
-                                            <th class="text-center">Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {{range .CompareRows}}
-                                        <tr class="row-{{.Status}}">
-                                            <td>{{.Field}}</td>
-                                            <td>{{.GT}}</td>
-                                            <td>{{.Pred}}</td>
-                                            <td class="text-center">
-                                                {{if eq .Status "correct"}}<span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-circle-fill"></i> Correct</span>
-                                                {{else if eq .Status "wrong"}}<span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-x-circle-fill"></i> Wrong</span>
-                                                {{else if eq .Status "missing"}}<span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill"></i> Missing</span>
-                                                {{else if eq .Status "extra"}}<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-plus-circle-fill"></i> Extra</span>{{end}}
-                                            </td>
-                                        </tr>
-                                        {{end}}
-                                    </tbody>
-                                </table>
+                            <div class="collapse" id="compareKHS-{{$idx}}">
+                                <h6 class="fw-semibold"><i class="bi bi-list-columns-reverse"></i> Compare Table</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-hover table-striped table-sm mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Field</th>
+                                                <th>Ground Truth</th>
+                                                <th>Extract</th>
+                                                <th class="text-center">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {{range $doc.CompareRows}}
+                                            <tr class="row-{{.Status}}">
+                                                <td>{{.Field}}</td>
+                                                <td>{{.GT}}</td>
+                                                <td>{{.Pred}}</td>
+                                                <td class="text-center">
+                                                    {{if eq .Status "correct"}}<span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-circle-fill"></i> Correct</span>
+                                                    {{else if eq .Status "wrong"}}<span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-x-circle-fill"></i> Wrong</span>
+                                                    {{else if eq .Status "missing"}}<span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill"></i> Missing</span>
+                                                    {{else if eq .Status "extra"}}<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-plus-circle-fill"></i> Extra</span>{{end}}
+                                                </td>
+                                            </tr>
+                                            {{end}}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                             {{else}}
                             <div class="text-center py-4 bg-body-tertiary rounded border">
                                 <i class="bi bi-exclamation-circle display-4 text-warning"></i>
-                                <p class="text-body-secondary mt-2 mb-3">{{if .HasExtract}}Perlu GT{{else if .HasGT}}Perlu Extract{{else}}Belum Digunakan{{end}}</p>
+                                <p class="text-body-secondary mt-2 mb-3">{{if $doc.HasExtract}}Perlu GT{{else if $doc.HasGT}}Perlu Extract{{else}}Belum Digunakan{{end}}</p>
                                 <div class="d-flex flex-wrap gap-2 justify-content-center">
-                                    {{if not .HasExtract}}
+                                    {{if not $doc.HasExtract}}
                                     <button class="btn btn-primary extract-btn"
                                             data-npm="{{$.NPM}}"
                                             data-doctype="khs"
-                                            data-file="{{.File}}"
-                                            {{if not .HasRaw}}disabled{{end}}>
+                                            data-file="{{$doc.File}}"
+                                            {{if not $doc.HasRaw}}disabled{{end}}>
                                         <i class="bi bi-magic"></i> Extract Data
                                     </button>
-                                    {{if not .HasRaw}}
+                                    {{if not $doc.HasRaw}}
                                     <span class="text-muted small align-self-center">PDF belum diunduh</span>
                                     {{end}}
                                     {{end}}
-                                    <a href="/eval/{{$.NPM}}/khs/{{.File}}/edit" class="btn btn-success {{if not .HasExtract}}disabled{{end}}">
+                                    <a href="/eval/{{$.NPM}}/khs/{{$doc.File}}/edit" class="btn btn-success {{if not $doc.HasExtract}}disabled{{end}}">
                                         <i class="bi bi-plus-lg"></i> Buat GT
                                     </a>
                                 </div>

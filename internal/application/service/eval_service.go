@@ -509,3 +509,59 @@ func docTypeToCategory(docType string) string {
 	}
 	return "KHS"
 }
+
+// StudentEntry is a lightweight struct for the student list page.
+// It contains only the data needed for the list view — no metrics.
+type StudentEntry = entity.StudentEntry
+
+// StudentList returns all NPMs with their names WITHOUT expensive metrics computation.
+// Uses partial JSON decode to extract only the "nama" field from GT.
+func (s *EvalService) StudentList() ([]StudentEntry, error) {
+	npms, err := s.store.ListNPMs()
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]StudentEntry, 0, len(npms))
+	for _, npm := range npms {
+		name := s.fastNameLookup(npm)
+		entries = append(entries, StudentEntry{NPM: npm, Name: name})
+	}
+	return entries, nil
+}
+
+// fastNameLookup does a partial JSON decode to extract only the "nama" field.
+// Avoids full evaluateDoc() which reads both GT + extract and compares all fields.
+func (s *EvalService) fastNameLookup(npm string) string {
+	docs, _ := s.store.ListDocs(npm)
+	for _, doc := range docs {
+		if !doc.HasGT {
+			continue
+		}
+		gtData, err := s.store.LoadGT(npm, doc.DocType, doc.File)
+		if err != nil {
+			continue
+		}
+		// Partial decode — only extract "khs.mahasiswa.nama" or "krs.mahasiswa.nama"
+		var partial struct {
+			KHS struct {
+				Mahasiswa struct {
+					Nama string `json:"nama"`
+				} `json:"mahasiswa"`
+			} `json:"khs"`
+			KRS struct {
+				Mahasiswa struct {
+					Nama string `json:"nama"`
+				} `json:"mahasiswa"`
+			} `json:"krs"`
+		}
+		if err := json.Unmarshal(gtData, &partial); err == nil {
+			if partial.KHS.Mahasiswa.Nama != "" {
+				return partial.KHS.Mahasiswa.Nama
+			}
+			if partial.KRS.Mahasiswa.Nama != "" {
+				return partial.KRS.Mahasiswa.Nama
+			}
+		}
+	}
+	return ""
+}

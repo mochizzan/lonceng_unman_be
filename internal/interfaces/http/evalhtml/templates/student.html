@@ -23,69 +23,79 @@
                 </div>
 
                 <!-- Search and Pagination Controls -->
-                <div class="card card-interactive border-0 shadow-sm mb-4">
+                <form method="GET" class="card card-interactive border-0 shadow-sm mb-4">
                     <div class="card-body">
                         <div class="row g-2 align-items-center">
+                            <input type="hidden" name="page" value="1">
                             <div class="col-auto">
                                 <label class="col-form-label text-body-secondary"><i class="bi bi-search"></i> Cari:</label>
                             </div>
                             <div class="col-md-4">
-                                <input type="text" class="form-control form-control-sm" id="searchInput" placeholder="NPM atau Nama...">
+                                <input type="text" name="q" class="form-control form-control-sm" placeholder="NPM atau Nama..." value="{{.Query}}">
                             </div>
                             <div class="col-auto ms-auto">
                                 <label class="col-form-label text-body-secondary"><i class="bi bi-list-ol"></i> Tampilkan:</label>
                             </div>
                             <div class="col-auto">
-                                <select class="form-select form-select-sm" id="perPageSelect" style="width: auto;">
-                                    <option value="25" selected>25</option>
-                                    <option value="50">50</option>
-                                    <option value="100">100</option>
+                                <select name="per_page" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+                                    <option value="25" {{if eq .PerPage 25}}selected{{end}}>25</option>
+                                    <option value="50" {{if eq .PerPage 50}}selected{{end}}>50</option>
+                                    <option value="100" {{if eq .PerPage 100}}selected{{end}}>100</option>
                                 </select>
                             </div>
                         </div>
                     </div>
-                </div>
+                </form>
 
-                <!-- Student List Container -->
-                <div id="studentListContainer">
-                    <div class="text-center py-5">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Memuat...</span>
-                        </div>
-                        <p class="text-body-secondary mt-3">Memuat data mahasiswa...</p>
-                    </div>
+                <!-- Student List Table -->
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>NPM</th>
+                                <th>Nama</th>
+                                <th class="text-center">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {{range .Students}}
+                            <tr>
+                                <td><a href="/eval/{{.NPM}}" class="fw-semibold">{{.NPM}}</a></td>
+                                <td>{{if .Name}}{{.Name}}{{else}}-{{end}}</td>
+                                <td class="text-center">
+                                    <a href="/eval/{{.NPM}}" class="btn btn-sm btn-outline-info">Detail</a>
+                                    <a href="/eval/krs?npm={{.NPM}}" class="btn btn-sm btn-outline-primary">KRS</a>
+                                    <a href="/eval/khs?npm={{.NPM}}" class="btn btn-sm btn-outline-success">KHS</a>
+                                </td>
+                            </tr>
+                        {{else}}
+                            <tr><td colspan="3" class="text-center py-5">Tidak ada mahasiswa ditemukan.</td></tr>
+                        {{end}}
+                        </tbody>
+                    </table>
                 </div>
 
                 <!-- Pagination Navigation -->
                 <nav aria-label="Navigasi halaman mahasiswa" class="mt-4">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                        <!-- Page Info -->
-                        <p class="text-body-secondary mb-0" id="pageInfo">
-                            Menampilkan <span id="showingStart">0</span> - <span id="showingEnd">0</span> dari <span id="totalRecords">0</span> mahasiswa
+                        <p class="text-body-secondary mb-0">
+                            Showing {{len .Students}} of {{.TotalCount}} students (Page {{.Page}} of {{.TotalPages}})
                         </p>
-                        <!-- Bootstrap 5 Pagination -->
-                        <ul class="pagination pagination-sm justify-content-center mb-0" id="paginationControls">
-                            <!-- Previous Button -->
-                            <li class="page-item disabled" id="prevPageItem">
-                                <a class="page-link" href="#" aria-label="Sebelumnya" id="prevPageLink">
-                                    <span aria-hidden="true">&laquo;</span>
-                                </a>
+                        <ul class="pagination pagination-sm justify-content-center mb-0">
+                            <li class="page-item {{if le .Page 1}}disabled{{end}}">
+                                <a class="page-link" href="?page={{sub .Page 1}}&per_page={{.PerPage}}">&laquo;</a>
                             </li>
-                            <!-- Page Numbers (dynamically generated) -->
-                            <li class="page-item active" aria-current="page">
-                                <a class="page-link" href="#">1</a>
-                            </li>
-                            <!-- Next Button -->
-                            <li class="page-item" id="nextPageItem">
-                                <a class="page-link" href="#" aria-label="Selanjutnya" id="nextPageLink">
-                                    <span aria-hidden="true">&raquo;</span>
-                                </a>
+                            {{range $i := .Pages}}
+                                <li class="page-item {{if eq $i $.Page}}active{{end}}">
+                                    <a class="page-link" href="?page={{$i}}&per_page={{$.PerPage}}">{{$i}}</a>
+                                </li>
+                            {{end}}
+                            <li class="page-item {{if ge .Page .TotalPages}}disabled{{end}}">
+                                <a class="page-link" href="?page={{add .Page 1}}&per_page={{.PerPage}}">&raquo;</a>
                             </li>
                         </ul>
                     </div>
                 </nav>
-
-                <script type="module" src="/eval/static/js/student.js"></script>
             </main>
         </div>
     </div>

@@ -24,6 +24,8 @@ type EvalService interface {
 	Index() (entity.IndexEval, error)
 	// Student returns full evaluation for one NPM.
 	Student(npm string) (entity.StudentEval, error)
+	// StudentList returns lightweight student list without metrics.
+	StudentList() ([]entity.StudentEntry, error)
 	// SaveKRS saves GT for KRS (write-only POST).
 	SaveKRS(npm string, filename string, req entity.SaveGTRequest) error
 	// SaveKHS saves GT for KHS.

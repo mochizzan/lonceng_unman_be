@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"lonceng_unman_be/internal/apperror"
@@ -19,6 +20,21 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 )
+
+// templateFuncs provides custom functions for HTML templates.
+var templateFuncs = template.FuncMap{
+	"sub": func(a, b int) int { return a - b },
+	"add": func(a, b int) int { return a + b },
+	"le":  func(a, b int) bool { return a <= b },
+	"ge":  func(a, b int) bool { return a >= b },
+}
+
+// studentEntry is a lightweight struct for the student list page.
+// Defined here to avoid import cycle with entity package.
+type studentEntry struct {
+	NPM  string
+	Name string
+}
 
 // maxPDFPreviewSize caps the raw PDF size that we will base64-embed in the
 // edit page. Larger PDFs would blow up the HTML payload. The cap is
@@ -31,6 +47,7 @@ type EvalHandler struct {
 		Index() (entity.UnifiedEval, error)
 		Student(npm string) (entity.StudentEval, error)
 		LoadGT(npm, docType, filename string) ([]byte, error)
+		StudentList() ([]entity.StudentEntry, error)
 	}
 	evalDir    string
 	extractDir string
@@ -44,9 +61,10 @@ func NewEvalHandler(evalSvc interface {
 	Index() (entity.UnifiedEval, error)
 	Student(npm string) (entity.StudentEval, error)
 	LoadGT(npm, docType, filename string) ([]byte, error)
+	StudentList() ([]entity.StudentEntry, error)
 }, evalDir, extractDir, pdfDir string, parser port.PDFParser,
 ) (*EvalHandler, error) {
-	tmpl, err := template.ParseFS(evalhtml.TemplatesFS, "templates/*.html")
+	tmpl, err := template.New("eval").Funcs(templateFuncs).ParseFS(evalhtml.TemplatesFS, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -187,35 +205,54 @@ func mapStatusToBadge(status string) string {
 	}
 }
 
-// StudentList handles GET /api/v1/eval/students — returns JSON list of all NPMs with their data.
-func (h *EvalHandler) StudentList(c fiber.Ctx) error {
-	data, err := h.evalSvc.Index()
+// StudentPage handles GET /eval/student?page=1&per_page=25 — SSR student list with pagination.
+func (h *EvalHandler) StudentPage(c fiber.Ctx) error {
+	page, err := strconv.Atoi(c.Query("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	perPage, err := strconv.Atoi(c.Query("per_page", "25"))
+	if err != nil || (perPage != 25 && perPage != 50 && perPage != 100) {
+		perPage = 25
+	}
+
+	students, err := h.evalSvc.StudentList()
 	if err != nil {
 		return err
 	}
 
-	// Build a unique list of students from UnifiedRows
-	seen := make(map[string]bool)
-	students := []map[string]interface{}{}
-	for _, r := range data.UnifiedRows {
-		if seen[r.NPM] {
-			continue
-		}
-		seen[r.NPM] = true
-		students = append(students, map[string]interface{}{
-			"npm":  r.NPM,
-			"name": r.Name,
-		})
+	total := len(students)
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	if page > totalPages {
+		page = totalPages
 	}
 
-	return response.Success(c, fiber.StatusOK, students, "Student list retrieved")
-}
+	start := (page - 1) * perPage
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+	pageStudents := students[start:end]
 
-// StudentPage handles GET /eval/student — standalone Student data page.
-func (h *EvalHandler) StudentPage(c fiber.Ctx) error {
+	// Build page range for pagination
+	pages := make([]int, 0, totalPages)
+	for i := 1; i <= totalPages; i++ {
+		pages = append(pages, i)
+	}
+
 	dashData := map[string]interface{}{
 		"Title":      "Data Mahasiswa",
 		"ActivePage": "student",
+		"Students":   pageStudents,
+		"Page":       page,
+		"PerPage":    perPage,
+		"TotalPages": totalPages,
+		"TotalCount": total,
+		"Pages":      pages,
+		"Query":      c.Query("q"),
 		"Breadcrumbs": []Breadcrumb{
 			{Label: "Dashboard", URL: "/eval"},
 			{Label: "Mahasiswa"},
@@ -224,36 +261,6 @@ func (h *EvalHandler) StudentPage(c fiber.Ctx) error {
 
 	c.Set("Content-Type", "text/html")
 	return h.templates.ExecuteTemplate(c.Response().BodyWriter(), "student.html", dashData)
-}
-
-// KRSPage handles GET /eval/krs — standalone KRS data page.
-func (h *EvalHandler) KRSPage(c fiber.Ctx) error {
-	dashData := map[string]interface{}{
-		"Title":      "Data KRS",
-		"ActivePage": "krs",
-		"Breadcrumbs": []Breadcrumb{
-			{Label: "Dashboard", URL: "/eval"},
-			{Label: "KRS"},
-		},
-	}
-
-	c.Set("Content-Type", "text/html")
-	return h.templates.ExecuteTemplate(c.Response().BodyWriter(), "krs.html", dashData)
-}
-
-// KHSPage handles GET /eval/khs — standalone KHS data page.
-func (h *EvalHandler) KHSPage(c fiber.Ctx) error {
-	dashData := map[string]interface{}{
-		"Title":      "Data KHS",
-		"ActivePage": "khs",
-		"Breadcrumbs": []Breadcrumb{
-			{Label: "Dashboard", URL: "/eval"},
-			{Label: "KHS"},
-		},
-	}
-
-	c.Set("Content-Type", "text/html")
-	return h.templates.ExecuteTemplate(c.Response().BodyWriter(), "khs.html", dashData)
 }
 
 // PipelinePage handles GET /eval/pipeline — pipeline visualization page.

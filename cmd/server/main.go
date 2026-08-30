@@ -70,6 +70,10 @@ func main() {
 	if err != nil {
 		panic("failed to create eval handler: " + err.Error())
 	}
+	evalDataHandler, err := handler.NewEvalDataHandler(extractionService)
+	if err != nil {
+		panic("failed to create eval data handler: " + err.Error())
+	}
 	evalGTHandler := handler.NewEvalGTHandler(evalService)
 
 	// Wire auth handler
@@ -85,7 +89,7 @@ func main() {
 	extractionHandler := handler.NewExtractionHandler(extractionService)
 
 	// Register routes
-	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler, studentProfileHandler, evalHandler, evalGTHandler, authHandler, cfg)
+	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler, studentProfileHandler, evalHandler, evalDataHandler, evalGTHandler, authHandler, cfg)
 
 	// Start server
 	log.Info(

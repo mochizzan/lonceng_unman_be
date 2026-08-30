@@ -15,7 +15,7 @@ import (
 )
 
 // Setup registers all application routes on the Fiber app.
-func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *handler.LMSHandler, docHandler *handler.DocumentHandler, extractionHandler *handler.ExtractionHandler, studentProfileHandler *handler.StudentProfileHandler, evalHandler *handler.EvalHandler, evalGTHandler *handler.EvalGTHandler, authHandler *handler.AuthHandler, cfg *config.Config) {
+func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *handler.LMSHandler, docHandler *handler.DocumentHandler, extractionHandler *handler.ExtractionHandler, studentProfileHandler *handler.StudentProfileHandler, evalHandler *handler.EvalHandler, evalDataHandler *handler.EvalDataHandler, evalGTHandler *handler.EvalGTHandler, authHandler *handler.AuthHandler, cfg *config.Config) {
 	v1 := app.Group("/api/v1")
 
 	// Health
@@ -56,7 +56,6 @@ func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *han
 
 	// Eval JSON API group (under /api/v1) — protected
 	evalV1 := v1.Group("/eval", evalAuth)
-	evalV1.Get("/students", evalHandler.StudentList)
 	evalV1.Post("/:npm/krs/:file", evalGTHandler.SaveKRS)
 	evalV1.Post("/:npm/khs/:file", evalGTHandler.SaveKHS)
 	evalV1.Post("/:npm/krs/:file/auto-extract", evalHandler.AutoExtractKRS)
@@ -70,8 +69,8 @@ func Setup(app *fiber.App, healthHandler *handler.HealthHandler, lmsHandler *han
 	// Static routes must be registered before parameterized routes.
 	evalHTML := app.Group("/eval", evalAuth)
 	evalHTML.Get("/student", evalHandler.StudentPage)
-	evalHTML.Get("/krs", evalHandler.KRSPage)
-	evalHTML.Get("/khs", evalHandler.KHSPage)
+	evalHTML.Get("/krs", evalDataHandler.KRSPage)
+	evalHTML.Get("/khs", evalDataHandler.KHSPage)
 	evalHTML.Get("/", evalHandler.Index)
 	evalHTML.Get("/pipeline", evalHandler.PipelinePage)
 	evalHTML.Get("/:npm", evalHandler.Student)

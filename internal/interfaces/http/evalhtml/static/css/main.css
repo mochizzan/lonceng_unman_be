@@ -323,6 +323,39 @@
     box-shadow: var(--neu-in-sm), 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
 }
 
+/* Compare table collapse toggle — chevron rotates with Bootstrap's .collapsed state */
+.compare-toggle {
+    padding: 0.15rem 0.35rem;
+    font-size: 0.95rem;
+    color: var(--bs-secondary-color);
+    text-decoration: none;
+    border-radius: var(--neu-radius-sm);
+    transition: color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.compare-toggle:hover {
+    color: var(--eval-primary);
+    box-shadow: var(--neu-out-sm);
+}
+
+.compare-toggle:focus {
+    box-shadow: var(--neu-in-sm);
+}
+
+.compare-toggle i {
+    display: inline-block;
+    transition: transform 0.25s ease;
+}
+
+/* Bootstrap adds .collapsed when the target is HIDDEN (default state) */
+.compare-toggle.collapsed i {
+    transform: rotate(0deg);
+}
+
+.compare-toggle:not(.collapsed) i {
+    transform: rotate(180deg);
+}
+
 /* Row status coloring (detail compare tables) */
 .table tbody tr.row-correct > td:first-child {
     border-left: 3px solid var(--eval-success);

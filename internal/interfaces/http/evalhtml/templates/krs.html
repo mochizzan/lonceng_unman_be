@@ -23,31 +23,55 @@
                 </div>
 
                 <!-- NPM Input -->
-                <div class="card card-interactive border-0 shadow-sm mb-4">
+                <form method="GET" class="card card-interactive border-0 shadow-sm mb-4">
                     <div class="card-body">
                         <div class="row g-2 align-items-end">
                             <div class="col-md-4">
                                 <label class="form-label text-body-secondary"><i class="bi bi-person"></i> NPM</label>
-                                <input type="text" class="form-control form-control-sm" id="npmInput" placeholder="Masukkan NPM...">
+                                <input type="text" name="npm" class="form-control form-control-sm" placeholder="Masukkan NPM..." value="{{.NPM}}">
                             </div>
                             <div class="col-auto">
-                                <button class="btn btn-primary btn-sm" id="loadKRSBtn"><i class="bi bi-search"></i> Tampilkan</button>
+                                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search"></i> Tampilkan</button>
                                 <a href="/eval/student" class="btn btn-outline-secondary btn-sm"><i class="bi bi-people"></i> Daftar Mahasiswa</a>
                             </div>
                         </div>
                     </div>
-                </div>
+                </form>
 
-                <!-- KRS Data Container -->
-                <div id="krsDataContainer">
-                    <div class="text-center py-5">
-                        <i class="bi bi-arrow-up display-4 text-body-secondary"></i>
-                        <p class="lead text-body-secondary mt-3">Masukkan NPM untuk menampilkan data KRS.</p>
-                        <p class="text-body-tertiary">Gunakan <a href="/eval/student">Daftar Mahasiswa</a> untuk mencari NPM.</p>
+                <!-- KRS Data -->
+                {{if .Error}}
+                <div class="alert alert-warning d-flex align-items-center" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <div>
+                        <strong>Data Tidak Tersedia</strong><br>
+                        <span class="small">{{.Error}}</span>
                     </div>
                 </div>
-
-                <script type="module" src="/eval/static/js/krs.js"></script>
+                {{else if .KRS}}
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5>{{.KRS.Mahasiswa.Nama}}</h5>
+                        <p>{{.KRS.Mahasiswa.NPM}} | {{.KRS.Mahasiswa.ProgramStudi}}</p>
+                        <p>Semester {{.KRS.Periode.Semester}} | {{.KRS.Periode.TahunAjaran.Awal}}/{{.KRS.Periode.TahunAjaran.Akhir}}</p>
+                    </div>
+                </div>
+                <table class="table table-hover">
+                    <thead><tr><th>No</th><th>Kode</th><th>Mata Kuliah</th><th>SKS</th><th>Kelas</th></tr></thead>
+                    <tbody>
+                    {{range $i, $mk := .KRS.MataKuliah}}
+                        <tr>
+                            <td>{{$mk.No}}</td>
+                            <td>{{$mk.Kode}}</td>
+                            <td>{{$mk.Nama}}</td>
+                            <td>{{$mk.SKS}}</td>
+                            <td>{{$mk.Kelas}}</td>
+                        </tr>
+                    {{end}}
+                    </tbody>
+                </table>
+                {{else}}
+                <div class="text-center py-5">Masukkan NPM untuk menampilkan data KRS.</div>
+                {{end}}
             </main>
         </div>
     </div>

@@ -1,5 +1,11 @@
 package entity
 
+// StudentEntry is a lightweight struct for the student list page.
+type StudentEntry struct {
+	NPM  string `json:"npm"`
+	Name string `json:"name"`
+}
+
 // ConfusionCounts represents the four possible outcomes for a single field or course entry.
 type ConfusionCounts struct {
 	TP int `json:"tp"`

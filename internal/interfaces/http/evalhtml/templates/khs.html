@@ -23,42 +23,73 @@
                 </div>
 
                 <!-- NPM & Semester Input -->
-                <div class="card card-interactive border-0 shadow-sm mb-4">
+                <form method="GET" class="card card-interactive border-0 shadow-sm mb-4">
                     <div class="card-body">
                         <div class="row g-2 align-items-end">
                             <div class="col-md-3">
                                 <label class="form-label text-body-secondary"><i class="bi bi-person"></i> NPM</label>
-                                <input type="text" class="form-control form-control-sm" id="npmInput" placeholder="Masukkan NPM...">
+                                <input type="text" name="npm" class="form-control form-control-sm" placeholder="Masukkan NPM..." value="{{.NPM}}">
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label text-body-secondary"><i class="bi bi-calendar"></i> Tahun Ajaran</label>
-                                <input type="text" class="form-control form-control-sm" id="tahunAjaranInput" placeholder="cth: 2025/2026">
+                                <input type="text" name="tahun_ajaran" class="form-control form-control-sm" placeholder="cth: 2025/2026" value="{{.TahunAjaran}}">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label text-body-secondary"><i class="bi bi-layers"></i> Semester</label>
-                                <select class="form-select form-select-sm" id="semesterSelect">
-                                    <option value="GANJIL">Ganjil</option>
-                                    <option value="GENAP">Genap</option>
+                                <select name="semester" class="form-select form-select-sm">
+                                    <option value="GANJIL" {{if eq .Semester "GANJIL"}}selected{{end}}>Ganjil</option>
+                                    <option value="GENAP" {{if eq .Semester "GENAP"}}selected{{end}}>Genap</option>
                                 </select>
                             </div>
                             <div class="col-auto">
-                                <button class="btn btn-primary btn-sm" id="loadKHSBtn"><i class="bi bi-search"></i> Tampilkan</button>
+                                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-search"></i> Tampilkan</button>
                                 <a href="/eval/student" class="btn btn-outline-secondary btn-sm"><i class="bi bi-people"></i> Daftar Mahasiswa</a>
                             </div>
                         </div>
                     </div>
-                </div>
+                </form>
 
-                <!-- KHS Data Container -->
-                <div id="khsDataContainer">
-                    <div class="text-center py-5">
-                        <i class="bi bi-arrow-up display-4 text-body-secondary"></i>
-                        <p class="lead text-body-secondary mt-3">Masukkan NPM dan tahun ajaran untuk menampilkan data KHS.</p>
-                        <p class="text-body-tertiary">Gunakan <a href="/eval/student">Daftar Mahasiswa</a> untuk mencari NPM.</p>
+                <!-- KHS Data -->
+                {{if .Error}}
+                <div class="alert alert-warning d-flex align-items-center" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <div>
+                        <strong>Data Tidak Tersedia</strong><br>
+                        <span class="small">{{.Error}}</span>
                     </div>
                 </div>
-
-                <script type="module" src="/eval/static/js/khs.js"></script>
+                {{else if .KHS}}
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5>{{.KHS.Mahasiswa.Nama}}</h5>
+                        <p>{{.KHS.Mahasiswa.NPM}} | {{.KHS.Mahasiswa.ProgramStudi}}</p>
+                        <p>Semester {{.KHS.Periode.Semester}} | {{.KHS.Periode.TahunAjaran.Awal}}/{{.KHS.Periode.TahunAjaran.Akhir}}</p>
+                    </div>
+                </div>
+                <table class="table table-hover">
+                    <thead><tr><th>No</th><th>Kode</th><th>Mata Kuliah</th><th>SKS</th><th>Nilai</th></tr></thead>
+                    <tbody>
+                    {{range $i, $mk := .KHS.MataKuliah}}
+                        <tr>
+                            <td>{{$mk.No}}</td>
+                            <td>{{$mk.Kode}}</td>
+                            <td>{{$mk.Nama}}</td>
+                            <td>{{$mk.SKS}}</td>
+                            <td>{{$mk.Nilai}}</td>
+                        </tr>
+                    {{end}}
+                    </tbody>
+                </table>
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <p>Total SKS: {{.KHS.Rekapitulasi.TotalSKS}}</p>
+                        <p>Total Mutu: {{.KHS.Rekapitulasi.TotalMutu}}</p>
+                        <p>IPK: {{.KHS.Rekapitulasi.IPK}}</p>
+                    </div>
+                </div>
+                {{else}}
+                <div class="text-center py-5">Masukkan NPM, Tahun Ajaran, dan Semester untuk menampilkan data KHS.</div>
+                {{end}}
             </main>
         </div>
     </div>
