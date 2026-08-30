@@ -141,6 +141,8 @@ func (c *cachedStore) LoadGT(npm, docType, filename string) ([]byte, error) {
 **Stale Risk**: NONE
 **CSR**: NOT REQUIRED
 
+> **Relationship to Solution 1**: Solutions 1 and 2 are **alternatives for Student()** (both eliminate the evaluateDoc/buildCompareRows redundancy), but **complementary for Index()** — Solution 1 also caches GT reads between the name lookup loop and evaluateDoc() in Index(), while Solution 2 does not. Recommended: implement Solution 1 first; Solution 2 is optional cleanup.
+
 #### Design
 Refactor `evaluateDoc()` to return the parsed structs alongside metrics, eliminating the need for `buildCompareRows()` to re-read the same files.
 
