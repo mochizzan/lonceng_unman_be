@@ -46,12 +46,13 @@ type cachedSession struct {
 // Manager is an in-memory session cache keyed by NPM.
 // It is safe for concurrent use by multiple goroutines.
 type Manager struct {
-	cfg      *config.Config
-	mu       sync.RWMutex // guards sessions map only (read/write)
-	sessions map[string]*cachedSession
-	npmLocks sync.Map // map[string]*sync.Mutex, per-NPM lock for session creation
-	ttl      time.Duration
-	stopCh   chan struct{} // signals background cleanup to stop
+	cfg            *config.Config
+	mu             sync.RWMutex // guards sessions map only (read/write)
+	sessions       map[string]*cachedSession
+	npmLocks       sync.Map // map[string]*sync.Mutex, per-NPM lock for session creation
+	ttl            time.Duration
+	stopCh         chan struct{} // signals background cleanup to stop
+	browserFactory func() *browserInfra.Browser
 }
 
 // NewManager creates a session manager with the given config.
@@ -63,13 +64,61 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 
 	m := &Manager{
-		cfg:      cfg,
-		sessions: make(map[string]*cachedSession),
-		ttl:      ttl,
-		stopCh:   make(chan struct{}),
+		cfg:            cfg,
+		sessions:       make(map[string]*cachedSession),
+		ttl:            ttl,
+		stopCh:         make(chan struct{}),
+		browserFactory: browserInfra.New,
 	}
 	go m.cleanupLoop()
 	return m
+}
+
+// NewManagerWithFactory creates a session manager with a custom browser factory.
+// This is primarily used for testing to inject mock browsers.
+func NewManagerWithFactory(cfg *config.Config, factory func() *browserInfra.Browser) *Manager {
+	ttl := cfg.App.SessionTTL
+	if ttl == 0 {
+		ttl = 15 * time.Minute
+	}
+
+	m := &Manager{
+		cfg:            cfg,
+		sessions:       make(map[string]*cachedSession),
+		ttl:            ttl,
+		stopCh:         make(chan struct{}),
+		browserFactory: factory,
+	}
+	go m.cleanupLoop()
+	return m
+}
+
+// SessionCount returns the number of sessions currently cached.
+// This is primarily used for testing.
+func (m *Manager) SessionCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.sessions)
+}
+
+// InjectTestSession adds a session directly to the cache for testing purposes.
+// It bypasses the normal creation flow and does not enforce MaxSessions.
+func (m *Manager) InjectTestSession(npm string, browser *browserInfra.Browser, page *rod.Page) {
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessions[npm] = &cachedSession{
+		page:      page,
+		browser:   browser,
+		createdAt: now,
+		lastUsed:  now,
+	}
+}
+
+// Cleanup triggers the background cleanup logic immediately.
+// This is primarily for testing to avoid waiting for the ticker.
+func (m *Manager) Cleanup() {
+	m.cleanup()
 }
 
 // getNPMLock returns a per-NPM mutex. Different NPMs can create sessions in parallel.
@@ -122,7 +171,7 @@ func (m *Manager) createSessionWithRestore(npm, password string, profileDir stri
 		return nil, err
 	}
 
-	br := browserInfra.New()
+	br := m.browserFactory()
 	if err := br.ConnectWithProfile(m.cfg.App.BrowserHeadless, profileDir); err != nil {
 		slog.Warn("profile launch failed, falling back to full login",
 			"npm", npm, "error", err)
@@ -164,13 +213,18 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 	sess, ok := m.sessions[npm]
 	m.mu.RUnlock()
 
-	if ok && time.Since(sess.lastUsed) < m.ttl {
+	if ok {
 		sess.mu.Lock()
-		sess.lastUsed = time.Now()
-		sess.activeCount++
+		// Read lastUsed under sess.mu to avoid data race with the
+		// double-check block which writes lastUsed under the same lock.
+		if time.Since(sess.lastUsed) < m.ttl {
+			sess.lastUsed = time.Now()
+			sess.activeCount++
+			sess.mu.Unlock()
+			slog.Info("session reused", "npm", npm)
+			return newSession(sess), nil
+		}
 		sess.mu.Unlock()
-		slog.Info("session reused", "npm", npm)
-		return newSession(sess), nil
 	}
 
 	// Per-NPM lock: NPM-A does not block NPM-B.
@@ -183,13 +237,18 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 	sess, ok = m.sessions[npm]
 	m.mu.RUnlock()
 
-	if ok && time.Since(sess.lastUsed) < m.ttl {
+	if ok {
 		sess.mu.Lock()
-		sess.lastUsed = time.Now()
-		sess.activeCount++
+		// Read lastUsed under sess.mu to avoid data race with the
+		// fast-path block which writes lastUsed under the same lock.
+		if time.Since(sess.lastUsed) < m.ttl {
+			sess.lastUsed = time.Now()
+			sess.activeCount++
+			sess.mu.Unlock()
+			slog.Info("session reused (double-check)", "npm", npm)
+			return newSession(sess), nil
+		}
 		sess.mu.Unlock()
-		slog.Info("session reused (double-check)", "npm", npm)
-		return newSession(sess), nil
 	}
 
 	// Evict expired session for this NPM if it exists in map.
@@ -262,13 +321,19 @@ func (m *Manager) Close(npm string) error {
 // CloseAll releases all cached sessions.
 func (m *Manager) CloseAll() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Collect sessions to close, then release m.mu before calling Close()
+	// so that browser.Close() does not block other goroutines waiting on m.mu.
+	toClose := make([]*cachedSession, 0, len(m.sessions))
+	for _, sess := range m.sessions {
+		toClose = append(toClose, sess)
+	}
+	m.sessions = make(map[string]*cachedSession) // reset map under lock
+	m.mu.Unlock()
 
-	for npm, sess := range m.sessions {
+	for _, sess := range toClose {
 		sess.mu.Lock()
 		_ = sess.browser.Close()
 		sess.mu.Unlock()
-		delete(m.sessions, npm)
 	}
 	slog.Info("all sessions closed")
 }
@@ -317,7 +382,7 @@ func (m *Manager) createSession(npm, password string) (*cachedSession, error) {
 		return nil, err
 	}
 
-	br := browserInfra.New()
+	br := m.browserFactory()
 	if err := br.Connect(m.cfg.App.BrowserHeadless); err != nil {
 		return nil, fmt.Errorf("browser connect: %w", err)
 	}
@@ -424,7 +489,6 @@ func (m *Manager) login(page *rod.Page, npm, password string) error {
 // skipping any session that is currently in active use.
 func (m *Manager) evictOldest() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	var oldestNPM string
 	var oldestTime time.Time
@@ -444,19 +508,23 @@ func (m *Manager) evictOldest() {
 	}
 
 	if oldestNPM == "" {
+		m.mu.Unlock()
 		return
 	}
 
 	sess, ok := m.sessions[oldestNPM]
 	if !ok {
+		m.mu.Unlock()
 		return
 	}
+
+	delete(m.sessions, oldestNPM)
+	m.mu.Unlock() // release m.mu before Close()
 
 	sess.mu.Lock()
 	_ = sess.browser.Close()
 	sess.mu.Unlock()
 
-	delete(m.sessions, oldestNPM)
 	slog.Info("evicted oldest session", "npm", oldestNPM)
 }
 
@@ -480,7 +548,11 @@ func (m *Manager) cleanupLoop() {
 func (m *Manager) cleanup() {
 	m.mu.Lock()
 	now := time.Now()
-	var toEvict []string
+	type evictionTarget struct {
+		npm  string
+		sess *cachedSession
+	}
+	var toEvict []evictionTarget
 	for npm, sess := range m.sessions {
 		sess.mu.Lock()
 		isActive := sess.activeCount > 0
@@ -495,7 +567,7 @@ func (m *Manager) cleanup() {
 					"npm", npm,
 					"age", now.Sub(createdAt).Round(time.Second))
 			}
-			toEvict = append(toEvict, npm)
+			toEvict = append(toEvict, evictionTarget{npm, sess})
 			continue
 		}
 
@@ -507,29 +579,29 @@ func (m *Manager) cleanup() {
 					"inactive_duration", now.Sub(lastUsed).Round(time.Second))
 				continue
 			}
-			toEvict = append(toEvict, npm)
+			toEvict = append(toEvict, evictionTarget{npm, sess})
 		}
 	}
 
-	// Evict dalam satu critical section
-	for _, npm := range toEvict {
-		sess, ok := m.sessions[npm]
-		if !ok {
-			continue
-		}
-
-		// Double-check: pastikan masih expired dan tidak aktif
-		sess.mu.Lock()
-		if sess.activeCount > 0 || time.Since(sess.lastUsed) < m.ttl {
-			sess.mu.Unlock()
-			slog.Info("session revived before eviction, skipping", "npm", npm)
-			continue
-		}
-		_ = sess.browser.Close()
-		sess.mu.Unlock()
-
-		delete(m.sessions, npm)
-		slog.Info("session evicted", "npm", npm)
+	// Remove evicted sessions from map under lock, then release m.mu
+	// before calling browser.Close() so that Close() does not block
+	// other goroutines waiting on m.mu.
+	for _, t := range toEvict {
+		delete(m.sessions, t.npm)
 	}
 	m.mu.Unlock()
+
+	// Close browsers outside m.mu critical section.
+	for _, t := range toEvict {
+		// Double-check: pastikan masih expired dan tidak aktif
+		t.sess.mu.Lock()
+		if t.sess.activeCount > 0 || time.Since(t.sess.lastUsed) < m.ttl {
+			t.sess.mu.Unlock()
+			slog.Info("session revived before eviction, skipping", "npm", t.npm)
+			continue
+		}
+		_ = t.sess.browser.Close()
+		t.sess.mu.Unlock()
+		slog.Info("session evicted", "npm", t.npm)
+	}
 }

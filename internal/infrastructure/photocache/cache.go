@@ -50,26 +50,35 @@ func (c *PhotoCache) Get(npm string) (string, error) {
 		return "", nil // expired
 	}
 
-	// Verify photo file exists
-	if _, err := os.Stat(photoPath); os.IsNotExist(err) {
-		return "", nil // photo file missing
+	// Verify photo file exists; if missing, delete orphan metadata and return miss
+	if _, err := os.Stat(photoPath); err != nil {
+		if os.IsNotExist(err) {
+			// Photo file is missing but metadata exists — orphan metadata.
+			// Delete it and report cache miss.
+			_ = os.Remove(metaPath)
+			return "", nil
+		}
+		return "", fmt.Errorf("stat photo file: %w", err)
 	}
 
 	return photoPath, nil
 }
 
-// Set saves the photo and metadata to cache.
+// Set saves the photo and metadata to cache atomically.
+// Both files are written via tmp+rename so a crash mid-write cannot leave
+// a partial file. Photo is written first, then metadata.
 func (c *PhotoCache) Set(npm string, photoData []byte, originalFilename string) error {
 	if err := os.MkdirAll(c.photoDir(npm), 0o755); err != nil {
 		return fmt.Errorf("create photo dir: %w", err)
 	}
 
-	// Save photo file
-	if err := os.WriteFile(c.photoPath(npm), photoData, 0o644); err != nil {
+	// Save photo file atomically via tmp+rename
+	photoPath := c.photoPath(npm)
+	if err := writeAtomic(photoPath, photoData, 0o644); err != nil {
 		return fmt.Errorf("save photo: %w", err)
 	}
 
-	// Save metadata
+	// Save metadata atomically via tmp+rename
 	meta := PhotoCacheMeta{
 		NPM:              npm,
 		CachedAt:         time.Now(),
@@ -80,10 +89,60 @@ func (c *PhotoCache) Set(npm string, photoData []byte, originalFilename string) 
 	if err != nil {
 		return fmt.Errorf("marshal cache meta: %w", err)
 	}
-	if err := os.WriteFile(c.metaPath(npm), metaData, 0o644); err != nil {
+	if err := writeAtomic(c.metaPath(npm), metaData, 0o644); err != nil {
 		return fmt.Errorf("save cache meta: %w", err)
 	}
 
+	return nil
+}
+
+// writeAtomic writes data to path via a temporary file + rename so the
+// target file is never observed in a partially-written state.
+func writeAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	_, err = tmp.Write(data)
+	if err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close temp: %w", err)
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("rename temp: %w", err)
+	}
+	return nil
+}
+
+// Invalidate removes both the metadata and photo files for a given NPM.
+// It is idempotent: missing files are ignored.
+func (c *PhotoCache) Invalidate(npm string) error {
+	var firstErr error
+	for _, path := range []string{c.metaPath(npm), c.photoPath(npm)} {
+		err := os.Remove(path)
+		if err != nil && !os.IsNotExist(err) {
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if firstErr != nil {
+		return fmt.Errorf("invalidate cache: %w", firstErr)
+	}
 	return nil
 }
 

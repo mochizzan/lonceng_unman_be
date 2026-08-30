@@ -38,5 +38,9 @@ func (h *LMSHandler) Login(c fiber.Ctx) error {
 		return apperror.Internal("login operation failed", err)
 	}
 
+	if !result.Success {
+		return response.Error(c, fiber.StatusUnauthorized, result.Message, nil)
+	}
+
 	return response.Success(c, fiber.StatusOK, result, result.Message)
 }

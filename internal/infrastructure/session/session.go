@@ -19,6 +19,7 @@ type rodSession struct {
 	page       *rod.Page
 	mu         *sync.Mutex    // shared with cachedSession; serializes page ops
 	cachedSess *cachedSession // back-reference for release tracking
+	closed     bool           // prevents double-decrement of activeCount
 }
 
 // newSession wraps a cachedSession's page into a BrowserSession.
@@ -138,10 +139,17 @@ func (s *rodSession) DownloadImage(url, savePath string) (string, int, error) {
 // Close signals that this session holder is done with the browser session,
 // decrementing the active use count so the session can be evicted if needed.
 // The underlying browser and page are managed by the session manager.
+// It is safe to call Close multiple times; subsequent calls are no-ops.
 func (s *rodSession) Close() error {
 	s.mu.Lock()
-	s.cachedSess.activeCount--
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	if s.cachedSess.activeCount > 0 {
+		s.cachedSess.activeCount--
+	}
 	return nil
 }
 

@@ -5,18 +5,10 @@ import (
 	"log/slog"
 
 	"lonceng_unman_be/internal/apperror"
+	"lonceng_unman_be/internal/interfaces/http/response"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
-
-// apiResponse is the standard error JSON envelope returned to clients.
-type apiResponse struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-	TraceID string `json:"trace_id,omitempty"`
-	Errors  any    `json:"errors,omitempty"`
-}
 
 // New returns a Fiber ErrorHandler that:
 //   - Extracts apperror.AppError or *fiber.Error for controlled status codes/messages
@@ -63,12 +55,6 @@ func New() fiber.ErrorHandler {
 			)
 		}
 
-		traceID := requestid.FromContext(c)
-
-		return c.Status(code).JSON(apiResponse{
-			Status:  "error",
-			Message: message,
-			TraceID: traceID,
-		})
+		return response.Error(c, code, message, nil)
 	}
 }

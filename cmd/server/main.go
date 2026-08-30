@@ -46,8 +46,8 @@ func main() {
 
 	// Wire session manager (in-memory cache with TTL)
 	sessionMgr := session.NewManager(cfg)
-	defer sessionMgr.Stop()
 	defer sessionMgr.CloseAll()
+	defer sessionMgr.Stop()
 
 	// Wire application services
 	healthService := service.NewHealthService(cfg.App)

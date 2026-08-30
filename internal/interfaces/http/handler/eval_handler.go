@@ -208,10 +208,7 @@ func (h *EvalHandler) StudentList(c fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(map[string]interface{}{
-		"status": "success",
-		"data":   students,
-	})
+	return response.Success(c, fiber.StatusOK, students, "Student list retrieved")
 }
 
 // StudentPage handles GET /eval/student — standalone Student data page.

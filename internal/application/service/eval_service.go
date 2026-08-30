@@ -433,7 +433,11 @@ func countResult(status string) (tp, fn, fp, tn int) {
 	case "tn":
 		return 0, 0, 0, 1
 	case "wrong":
-		return 0, 1, 1, 0
+		// A mismatched field (both GT and pred filled but not equal) is counted
+		// as a false-negative only: the GT value was missed by the prediction.
+		// Counting it as both FN+FP would inflate denominators and produce
+		// non-standard precision/recall/F1 scores.
+		return 0, 1, 0, 0
 	}
 	return 0, 0, 0, 0
 }
