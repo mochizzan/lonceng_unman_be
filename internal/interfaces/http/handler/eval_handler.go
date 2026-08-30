@@ -205,7 +205,7 @@ func mapStatusToBadge(status string) string {
 	}
 }
 
-// StudentPage handles GET /eval/student?page=1&per_page=25 — SSR student list with pagination.
+// StudentPage handles GET /eval/student?page=1&q=...&per_page=25 — SSR student list with pagination and search.
 func (h *EvalHandler) StudentPage(c fiber.Ctx) error {
 	page, err := strconv.Atoi(c.Query("page", "1"))
 	if err != nil || page < 1 {
@@ -216,12 +216,26 @@ func (h *EvalHandler) StudentPage(c fiber.Ctx) error {
 		perPage = 25
 	}
 
+	query := strings.ToLower(strings.TrimSpace(c.Query("q")))
+
 	students, err := h.evalSvc.StudentList()
 	if err != nil {
 		return err
 	}
 
-	total := len(students)
+	// Filter students by query (NPM or Name)
+	filtered := students
+	if query != "" {
+		filtered = nil
+		for _, s := range students {
+			if strings.Contains(strings.ToLower(s.NPM), query) ||
+				strings.Contains(strings.ToLower(s.Name), query) {
+				filtered = append(filtered, s)
+			}
+		}
+	}
+
+	total := len(filtered)
 	totalPages := (total + perPage - 1) / perPage
 	if totalPages < 1 {
 		totalPages = 1
@@ -235,7 +249,7 @@ func (h *EvalHandler) StudentPage(c fiber.Ctx) error {
 	if end > total {
 		end = total
 	}
-	pageStudents := students[start:end]
+	pageStudents := filtered[start:end]
 
 	// Build page range for pagination
 	pages := make([]int, 0, totalPages)

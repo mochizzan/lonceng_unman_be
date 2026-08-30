@@ -83,15 +83,15 @@
                         </p>
                         <ul class="pagination pagination-sm justify-content-center mb-0">
                             <li class="page-item {{if le .Page 1}}disabled{{end}}">
-                                <a class="page-link" href="?page={{sub .Page 1}}&per_page={{.PerPage}}">&laquo;</a>
+                                <a class="page-link" href="?page={{sub .Page 1}}&per_page={{.PerPage}}{{if .Query}}&q={{.Query}}{{end}}">&laquo;</a>
                             </li>
                             {{range $i := .Pages}}
                                 <li class="page-item {{if eq $i $.Page}}active{{end}}">
-                                    <a class="page-link" href="?page={{$i}}&per_page={{$.PerPage}}">{{$i}}</a>
+                                    <a class="page-link" href="?page={{$i}}&per_page={{$.PerPage}}{{if $.Query}}&q={{$.Query}}{{end}}">{{$i}}</a>
                                 </li>
                             {{end}}
                             <li class="page-item {{if ge .Page .TotalPages}}disabled{{end}}">
-                                <a class="page-link" href="?page={{add .Page 1}}&per_page={{.PerPage}}">&raquo;</a>
+                                <a class="page-link" href="?page={{add .Page 1}}&per_page={{.PerPage}}{{if .Query}}&q={{.Query}}{{end}}">&raquo;</a>
                             </li>
                         </ul>
                     </div>
