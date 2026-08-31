@@ -50,6 +50,22 @@ type AppConfig struct {
 	// Eval Dashboard Auth
 	EvalSecret string // SECRET_KEY (empty = fail-closed)
 	AutoLogin  bool   // AUTO_LOGIN (dev bypass, cannot be true in production)
+	// Cold-start tuning
+	// PhotoRenderWait is the initial wait after navigating to the dashboard
+	// so the JS-driven photo DOM has time to populate before the eval probe.
+	// Replaces a hardcoded 8s sleep in student_profile_service.
+	PhotoRenderWait time.Duration
+	// PhotoRetryWait is the wait between photo-scrape eval retries when the
+	// first attempt returns an empty src. Replaces a hardcoded 3s sleep.
+	PhotoRetryWait time.Duration
+	// ScrapeFormWait is the wait after the profile form is detected, allowing
+	// JS to populate all 55+ fields before the bulk eval. Replaces a
+	// hardcoded 3s sleep in scraper.Scrape.
+	ScrapeFormWait time.Duration
+	// BrowserLaunchTimeout caps l.Launch() + rod.New().Connect() together.
+	// Without this, go-rod's auto-download (or a hung Chromium spawn) can
+	// stall the entire cold path with no ceiling.
+	BrowserLaunchTimeout time.Duration
 }
 
 // CORSConfig holds CORS middleware configuration.
@@ -67,20 +83,28 @@ func New() (*Config, error) {
 
 	cfg := &Config{
 		App: AppConfig{
-			Name:              getEnv("APP_NAME", "lonceng_unman_be"),
-			Env:               getEnv("APP_ENV", "development"),
-			Port:              getEnv("APP_PORT", "3000"),
-			Host:              getEnv("APP_HOST", "0.0.0.0"),
-			LMSBaseURL:        getEnv("LMS_BASE_URL", "https://elearning.universitasmandiri.ac.id"),
-			LMSDashboardURL:   getEnv("LMS_DASHBOARD_URL", "https://elearning.universitasmandiri.ac.id/admin/"),
-			BrowserHeadless:   getEnvBool("BROWSER_HEADLESS", true),
-			BrowserTimeout:    getEnvDuration("BROWSER_TIMEOUT", 60*time.Second),
-			DNSTimeout:        getEnvDuration("DNS_TIMEOUT", 5*time.Second),
-			DownloadDir:       getEnv("DOWNLOAD_DIR", "./downloads"),
-			ExtractDir:        getEnv("EXTRACT_DIR", "./extracted"),
-			EvalDir:           getEnv("EVAL_DIR", "./eval/ground_truth"),
-			SessionTTL:        getEnvDuration("SESSION_TTL", 15*time.Minute),
-			MaxSessions:       getEnvInt("MAX_SESSIONS", 15),
+			Name:            getEnv("APP_NAME", "lonceng_unman_be"),
+			Env:             getEnv("APP_ENV", "development"),
+			Port:            getEnv("APP_PORT", "3000"),
+			Host:            getEnv("APP_HOST", "0.0.0.0"),
+			LMSBaseURL:      getEnv("LMS_BASE_URL", "https://elearning.universitasmandiri.ac.id"),
+			LMSDashboardURL: getEnv("LMS_DASHBOARD_URL", "https://elearning.universitasmandiri.ac.id/admin/"),
+			BrowserHeadless: getEnvBool("BROWSER_HEADLESS", true),
+			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 60*time.Second),
+			// DNS_TIMEOUT default lowered from 5s → 2s: a healthy DNS lookup
+			// resolves in 50-300ms (cached 1-5ms). 2s is the smallest ceiling
+			// that still covers a slow resolver without becoming the cold-start
+			// bottleneck. Operators can raise it if their network is unusual.
+			DNSTimeout:  getEnvDuration("DNS_TIMEOUT", 2*time.Second),
+			DownloadDir: getEnv("DOWNLOAD_DIR", "./downloads"),
+			ExtractDir:  getEnv("EXTRACT_DIR", "./extracted"),
+			EvalDir:     getEnv("EVAL_DIR", "./eval/ground_truth"),
+			// SESSION_TTL default raised from 15m → 24h: amortizes the cold-start
+			// cost across an entire academic day. Combined with the 2h hard
+			// lifetime cap (manager.go:26-30), sessions that survive past 2h
+			// are force-evicted anyway, so 24h is effectively a soft ceiling.
+			SessionTTL:        getEnvDuration("SESSION_TTL", 24*time.Hour),
+			MaxSessions:       getEnvInt("MAX_SESSIONS", 20),
 			ProfileBaseDir:    getEnv("PROFILE_BASE_DIR", "./profiles"),
 			MaxBodySize:       parseByteSize(getEnv("MAX_BODY_SIZE", "1MB")),
 			MaxPDFSize:        parseByteSize(getEnv("MAX_PDF_SIZE", "50MB")),
@@ -89,6 +113,20 @@ func New() (*Config, error) {
 			PhotoQuality:      getEnvInt("PHOTO_QUALITY", 80),
 			EvalSecret:        getEnv("SECRET_KEY", ""),
 			AutoLogin:         getEnvBool("AUTO_LOGIN", false),
+			// Cold-start tuning defaults (env-overridable).
+			// PHOTO_RENDER_WAIT replaces a hardcoded 8s wait; the 3s default
+			// matches observed LMS latency once the dashboard is on screen.
+			PhotoRenderWait: getEnvDuration("PHOTO_RENDER_WAIT", 3*time.Second),
+			// PHOTO_RETRY_WAIT replaces a hardcoded 3s retry loop wait; 1s is
+			// sufficient for the JS to re-render after a missed eval.
+			PhotoRetryWait: getEnvDuration("PHOTO_RETRY_WAIT", 1*time.Second),
+			// SCRAPE_FORM_WAIT replaces a hardcoded 3s wait after the form is
+			// detected; 2s is enough for the 55+ fields to populate.
+			ScrapeFormWait: getEnvDuration("SCRAPE_FORM_WAIT", 2*time.Second),
+			// BROWSER_LAUNCH_TIMEOUT caps the launcher.Launch() + Connect()
+			// window. Defaults to the same 60s as BROWSER_TIMEOUT because the
+			// launch path is the dominant cold-start cost.
+			BrowserLaunchTimeout: getEnvDuration("BROWSER_LAUNCH_TIMEOUT", 60*time.Second),
 		},
 		CORS: CORSConfig{
 			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),

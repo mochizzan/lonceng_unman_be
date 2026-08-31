@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"lonceng_unman_be/internal/config"
 	"lonceng_unman_be/internal/domain/entity"
 	"lonceng_unman_be/internal/domain/port"
 )
@@ -100,7 +101,7 @@ const scrapeJSCode = `async () => {
 
 // Scrape navigates to the profile page, validates the form exists,
 // and reads all fields via a single bulk JS eval.
-func (s *studentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL string) (*entity.StudentProfile, error) {
+func (s *studentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL string, cfg *config.Config) (*entity.StudentProfile, error) {
 	// 1. Navigate to student profile page (construct full URL).
 	profileURL := lmsBaseURL + port.StudentProfilePath
 	if err := session.Navigate(profileURL); err != nil {
@@ -117,7 +118,12 @@ func (s *studentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL s
 	}
 
 	// 2.5. Wait for JavaScript to populate form values.
-	time.Sleep(3 * time.Second)
+	// Default 2s (was hardcoded 3s); override with SCRAPE_FORM_WAIT env.
+	wait := 2 * time.Second
+	if cfg != nil && cfg.App.ScrapeFormWait > 0 {
+		wait = cfg.App.ScrapeFormWait
+	}
+	time.Sleep(wait)
 
 	// 3. Bulk JS eval — read all 55+ fields in one call.
 	result, err := session.Eval(scrapeJSCode)

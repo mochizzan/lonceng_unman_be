@@ -63,7 +63,7 @@ func (s *studentProfileService) Scrape(req entity.StudentProfileRequest) (*entit
 	defer session.Close()
 
 	// 2. Scrape profile (pass base URL for full navigation)
-	profile, err := s.scraper.Scrape(session, s.cfg.App.LMSBaseURL)
+	profile, err := s.scraper.Scrape(session, s.cfg.App.LMSBaseURL, s.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("scrape profile: %w", err)
 	}
@@ -140,8 +140,13 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 		return nil, "", fmt.Errorf("navigate to dashboard: %w", err)
 	}
 
-	// 4. Wait for page to fully render (photo may load dynamically)
-	time.Sleep(8 * time.Second)
+	// 4. Wait for page to fully render (photo may load dynamically).
+	// Default 3s (was hardcoded 8s); override with PHOTO_RENDER_WAIT env.
+	renderWait := s.cfg.App.PhotoRenderWait
+	if renderWait <= 0 {
+		renderWait = 3 * time.Second
+	}
+	time.Sleep(renderWait)
 
 	// 5. Extract photo src via JS eval with retry
 	// The <img> is inside <div class="small-box bg-yellow"> wrapped by <a href="ktm_take_foto.php">
@@ -168,8 +173,12 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 			break
 		}
 
-		// Wait before retry
-		time.Sleep(3 * time.Second)
+		// Wait before retry (was hardcoded 3s; override with PHOTO_RETRY_WAIT).
+		retryWait := s.cfg.App.PhotoRetryWait
+		if retryWait <= 0 {
+			retryWait = 1 * time.Second
+		}
+		time.Sleep(retryWait)
 	}
 	if err != nil {
 		return nil, "", fmt.Errorf("extract photo src: %w", err)

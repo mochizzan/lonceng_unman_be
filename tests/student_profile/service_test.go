@@ -56,12 +56,12 @@ func (m *mockSessionManager) Close(npm string) error {
 func (m *mockSessionManager) CloseAll() {}
 
 type mockStudentProfileScraper struct {
-	scrapeFunc func(session port.BrowserSession, lmsBaseURL string) (*entity.StudentProfile, error)
+	scrapeFunc func(session port.BrowserSession, lmsBaseURL string, cfg *config.Config) (*entity.StudentProfile, error)
 }
 
-func (m *mockStudentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL string) (*entity.StudentProfile, error) {
+func (m *mockStudentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL string, cfg *config.Config) (*entity.StudentProfile, error) {
 	if m.scrapeFunc != nil {
-		return m.scrapeFunc(session, lmsBaseURL)
+		return m.scrapeFunc(session, lmsBaseURL, cfg)
 	}
 	return &entity.StudentProfile{
 		PersonalData: entity.PersonalData{
@@ -224,7 +224,7 @@ func TestScrape_SessionError(t *testing.T) {
 func TestScrape_ScraperError(t *testing.T) {
 	sessions := &mockSessionManager{}
 	scraper := &mockStudentProfileScraper{
-		scrapeFunc: func(session port.BrowserSession, lmsBaseURL string) (*entity.StudentProfile, error) {
+		scrapeFunc: func(session port.BrowserSession, lmsBaseURL string, cfg *config.Config) (*entity.StudentProfile, error) {
 			return nil, fmt.Errorf("scrape failed")
 		},
 	}
@@ -296,7 +296,7 @@ func TestScrape_ProfileData(t *testing.T) {
 
 	sessions := &mockSessionManager{}
 	scraper := &mockStudentProfileScraper{
-		scrapeFunc: func(session port.BrowserSession, lmsBaseURL string) (*entity.StudentProfile, error) {
+		scrapeFunc: func(session port.BrowserSession, lmsBaseURL string, cfg *config.Config) (*entity.StudentProfile, error) {
 			return expectedProfile, nil
 		},
 	}
@@ -496,7 +496,7 @@ func TestScrapeGetRoundTrip(t *testing.T) {
 
 	// Re-scrape overwrites — simulate different data
 	updatedScraper := &mockStudentProfileScraper{
-		scrapeFunc: func(session port.BrowserSession, lmsBaseURL string) (*entity.StudentProfile, error) {
+		scrapeFunc: func(session port.BrowserSession, lmsBaseURL string, cfg *config.Config) (*entity.StudentProfile, error) {
 			return &entity.StudentProfile{
 				PersonalData: entity.PersonalData{
 					NIM:           testReq.NPM,

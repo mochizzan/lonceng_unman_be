@@ -57,25 +57,41 @@ type Manager struct {
 
 // NewManager creates a session manager with the given config.
 // It starts a background goroutine that evicts expired sessions.
+//
+// The browserFactory wraps browserInfra.New so that each new browser
+// receives the configured BrowserLaunchTimeout. This bounds the
+// rod.New().ControlURL().Connect() window (Tier-2 fix). The launch itself
+// (launcher.Launch()) does not take a context, but the post-launch
+// DevTools dial and any subsequent page ops now share the configured cap.
 func NewManager(cfg *config.Config) *Manager {
 	ttl := cfg.App.SessionTTL
 	if ttl == 0 {
 		ttl = 15 * time.Minute
 	}
 
+	launchTimeout := cfg.App.BrowserLaunchTimeout
+	if launchTimeout <= 0 {
+		launchTimeout = 60 * time.Second
+	}
+
 	m := &Manager{
-		cfg:            cfg,
-		sessions:       make(map[string]*cachedSession),
-		ttl:            ttl,
-		stopCh:         make(chan struct{}),
-		browserFactory: browserInfra.New,
+		cfg:      cfg,
+		sessions: make(map[string]*cachedSession),
+		ttl:      ttl,
+		stopCh:   make(chan struct{}),
+		browserFactory: func() *browserInfra.Browser {
+			b := browserInfra.New()
+			b.SetLaunchTimeout(launchTimeout)
+			return b
+		},
 	}
 	go m.cleanupLoop()
 	return m
 }
 
 // NewManagerWithFactory creates a session manager with a custom browser factory.
-// This is primarily used for testing to inject mock browsers.
+// This is primarily used for testing to inject mock browsers. The factory is
+// NOT wrapped with BrowserLaunchTimeout — tests typically don't need it.
 func NewManagerWithFactory(cfg *config.Config, factory func() *browserInfra.Browser) *Manager {
 	ttl := cfg.App.SessionTTL
 	if ttl == 0 {
@@ -166,11 +182,10 @@ func (m *Manager) validateSession(page *rod.Page) error {
 
 // createSessionWithRestore launches Chrome with a restored profile,
 // validates the session, and either returns it or falls back to full login.
+//
+// DNS pre-flight is performed at GetOrCreate top-level (single call). This
+// function only handles browser launch + session validation.
 func (m *Manager) createSessionWithRestore(npm, password string, profileDir string) (*cachedSession, error) {
-	if err := m.checkDNS(m.cfg.App.LMSBaseURL); err != nil {
-		return nil, err
-	}
-
 	br := m.browserFactory()
 	if err := br.ConnectWithProfile(m.cfg.App.BrowserHeadless, profileDir); err != nil {
 		slog.Warn("profile launch failed, falling back to full login",
@@ -273,6 +288,17 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 
 	// Try restore from disk before full login.
 	profileDir := m.profileDir(npm)
+
+	// Tier-2 fix: single DNS pre-flight per cold-start attempt. Previously
+	// this ran twice on the restore→fallback path (once in
+	// createSessionWithRestore, once in createSession). The OS DNS cache
+	// absorbs the second call but it's still wasted work; more importantly,
+	// we want a fail-fast at the top level so callers see a clear error
+	// instead of two timeouts chained together.
+	if err := m.checkDNS(m.cfg.App.LMSBaseURL); err != nil {
+		return nil, err
+	}
+
 	var err error
 	if _, statErr := os.Stat(profileDir); statErr == nil {
 		sess, err = m.createSessionWithRestore(npm, password, profileDir)
@@ -375,13 +401,10 @@ func (m *Manager) checkDNS(rawURL string) error {
 }
 
 // createSession launches a browser, logs in, and returns the cached session.
+//
+// DNS pre-flight is performed at GetOrCreate top-level (single call). This
+// function only handles browser launch + login form submission.
 func (m *Manager) createSession(npm, password string) (*cachedSession, error) {
-	// DNS pre-flight: fail fast if the LMS host is unreachable,
-	// avoiding a 30 s timeout when DNS is broken.
-	if err := m.checkDNS(m.cfg.App.LMSBaseURL); err != nil {
-		return nil, err
-	}
-
 	br := m.browserFactory()
 	if err := br.Connect(m.cfg.App.BrowserHeadless); err != nil {
 		return nil, fmt.Errorf("browser connect: %w", err)
