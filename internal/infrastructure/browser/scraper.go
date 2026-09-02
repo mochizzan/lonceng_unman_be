@@ -22,14 +22,31 @@ func NewStudentProfileScraper() port.StudentProfileScraper {
 // go-rod's Eval wraps the code in: function() { return (CODE).apply(this, arguments) }
 // So we pass an async function expression directly — NOT an IIFE.
 const scrapeJSCode = `async () => {
+    const isPlaceholder = (el, selected) => {
+        // Empty value is a placeholder
+        if (selected.value === '') return true;
+        // Common numeric placeholder values
+        if (selected.value === '0' || selected.value === '-1') return true;
+        // Text-based placeholders (Indonesian and English)
+        const text = (selected.text || '').trim().toLowerCase();
+        if (text.startsWith('pilih ') || text === 'pilih') return true;
+        if (text === '--' || text === '-' || text === '---') return true;
+        if (text === 'select' || text === 'choose') return true;
+        // Disabled options are placeholders
+        if (selected.disabled) return true;
+        // data-placeholder attribute
+        if (el.getAttribute('data-placeholder') === 'true') return true;
+        return false;
+    };
+
     const getVal = (id) => {
         const el = document.getElementById(id);
         if (!el) return '';
         if (el.tagName === 'SELECT') {
             const selected = el.options[el.selectedIndex];
             if (!selected) return el.value || '';
-            // If the selected option has empty value, it's a placeholder — return empty
-            if (selected.value === '') return '';
+            // If the selected option is a placeholder, return empty
+            if (isPlaceholder(el, selected)) return '';
             // Return display text (not value) for real selections
             return selected.text || selected.value || '';
         }
@@ -101,11 +118,28 @@ const scrapeJSCode = `async () => {
 
 // Scrape navigates to the profile page, validates the form exists,
 // and reads all fields via a single bulk JS eval.
+//
+// The caller must hold the session's Lock() for the entire scrape to
+// prevent concurrent requests from interleaving page operations on the
+// shared rod.Page. This fixes the race condition where concurrent scrapes
+// would fail immediately (3-10ms) because the page was left in a bad state
+// by another goroutine.
 func (s *studentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL string, cfg *config.Config) (*entity.StudentProfile, error) {
 	// 1. Navigate to student profile page (construct full URL).
 	profileURL := lmsBaseURL + port.StudentProfilePath
 	if err := session.Navigate(profileURL); err != nil {
 		return nil, fmt.Errorf("navigate to student profile: %w", err)
+	}
+
+	// 1.5. Verify page is healthy by checking the URL.
+	// If the page is in a bad state (e.g., after a previous timeout),
+	// the URL may be empty or about:blank. Navigate again if needed.
+	pageCheck, err := session.Eval(`async () => window.location.href`)
+	if err != nil || pageCheck == "" || pageCheck == `"about:blank"` {
+		// Page is in a bad state, try navigating again.
+		if err := session.Navigate(profileURL); err != nil {
+			return nil, fmt.Errorf("re-navigate to student profile: %w", err)
+		}
 	}
 
 	// 2. Validate form exists on the page.
@@ -118,12 +152,58 @@ func (s *studentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL s
 	}
 
 	// 2.5. Wait for JavaScript to populate form values.
-	// Default 2s (was hardcoded 3s); override with SCRAPE_FORM_WAIT env.
-	wait := 2 * time.Second
+	// Probe key input fields to verify JS has populated the form.
+	// This is more reliable than a fixed sleep — it adapts to actual page
+	// readiness instead of hoping a fixed duration is enough.
+	//
+	// Default 60s because LMS AJAX calls can be slow on cold starts or
+	// congested networks. The login flow already takes ~30s on cold starts,
+	// so data fetching can be similarly slow. SCRAPE_FORM_WAIT env var
+	// overrides but is clamped to a 10s minimum to avoid premature timeouts.
+	probeTimeout := 60 * time.Second
 	if cfg != nil && cfg.App.ScrapeFormWait > 0 {
-		wait = cfg.App.ScrapeFormWait
+		probeTimeout = cfg.App.ScrapeFormWait
+		if probeTimeout < 10*time.Second {
+			probeTimeout = 10 * time.Second
+		}
 	}
-	time.Sleep(wait)
+	ready := false
+	deadline := time.Now().Add(probeTimeout)
+	for time.Now().Before(deadline) {
+		// Check multiple key fields — some pages populate inputs in stages
+		check, err := session.Eval(`async () => {
+			const fields = ['nim', 'nama_mahasiswa', 'nik', 'email', 'no_wa', 'tempat_lahir'];
+			for (const id of fields) {
+				const el = document.getElementById(id);
+				if (el && el.value && el.value.trim() !== '') return el.value.trim();
+			}
+			return '';
+		}`)
+		if err == nil && check != "" && check != "''" {
+			ready = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !ready {
+		// Diagnostic: dump all input/select element IDs and values for debugging.
+		dump, _ := session.Eval(`async () => {
+			const result = {};
+			document.querySelectorAll('input, select, textarea').forEach(el => {
+				const id = el.id || el.name || 'unknown';
+				let val = '';
+				if (el.tagName === 'SELECT') {
+					const sel = el.options[el.selectedIndex];
+					val = sel ? (sel.text || sel.value || '') : '';
+				} else {
+					val = el.value || '';
+				}
+				result[id] = val.substring(0, 100);
+			});
+			return JSON.stringify(result);
+		}`)
+		return nil, fmt.Errorf("form fields not populated within %v — page may have failed to load student data. DOM snapshot: %s", probeTimeout, dump)
+	}
 
 	// 3. Bulk JS eval — read all 55+ fields in one call.
 	result, err := session.Eval(scrapeJSCode)

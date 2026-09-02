@@ -7,6 +7,7 @@ import { postJSON } from './shared/api-client.js';
 import { bindPdfZoom } from './shared/pdf-zoom.js';
 import { appendRow, bindRowRemovers, readRows } from './shared/row-ops.js';
 import { wireAutoExtract } from './shared/auto-extract.js';
+import { confirmOverwrite } from './shared/confirm-modal.js';
 
 // Column schema must mirror the KHS table in edit_khs.html.
 const KHS_COLUMNS = [
@@ -69,10 +70,20 @@ document.querySelector('.add-row')?.addEventListener('click', () => {
 document.getElementById('gtForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const form = e.currentTarget;
+    
+    // Check if GT exists via data attribute
+    const gtExists = form.dataset.gtExists === 'true';
+    
+    // Show confirmation modal only when GT exists
+    if (gtExists) {
+        const confirmed = await confirmOverwrite();
+        if (!confirmed) return; // User clicked "Tidak" — abort submit
+    }
+    
     const formData = new FormData(form);
 
     const data = {
-        confirm_overwrite: formData.get('confirm_overwrite') === 'true',
+        confirm_overwrite: gtExists,  // true only if user confirmed via modal
         khs: {
             khs: {
                 mahasiswa: {

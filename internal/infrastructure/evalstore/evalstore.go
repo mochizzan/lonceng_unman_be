@@ -33,13 +33,14 @@ func NewCachedStore(inner port.EvalStore) port.EvalStore {
 }
 
 // cacheKey builds a stable cache key from the load parameters.
-func cacheKey(npm, docType, filename string) string {
-	return npm + "/" + docType + "/" + filename
+// The prefix distinguishes GT from extract to prevent collisions.
+func cacheKey(prefix, npm, docType, filename string) string {
+	return prefix + ":" + npm + "/" + docType + "/" + filename
 }
 
 // LoadGT returns cached GT data if available, otherwise delegates to the inner store.
 func (c *cachedStore) LoadGT(npm, docType, filename string) ([]byte, error) {
-	key := cacheKey(npm, docType, filename)
+	key := cacheKey("gt", npm, docType, filename)
 	if data, ok := c.cache[key]; ok {
 		return data, nil
 	}
@@ -53,7 +54,7 @@ func (c *cachedStore) LoadGT(npm, docType, filename string) ([]byte, error) {
 
 // LoadExtract returns cached extract data if available, otherwise delegates to the inner store.
 func (c *cachedStore) LoadExtract(npm, docType, filename string) ([]byte, error) {
-	key := cacheKey(npm, docType, filename)
+	key := cacheKey("extract", npm, docType, filename)
 	if data, ok := c.cache[key]; ok {
 		return data, nil
 	}

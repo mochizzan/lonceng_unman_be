@@ -26,6 +26,12 @@ services:
     hostname: lonceng-api
     restart: unless-stopped
 
+    # --- Environment File ---
+    # Seluruh isi .env diteruskan ke container.
+    # Docker Compose juga otomatis membaca .env untuk substitusi ${VAR} di file ini.
+    env_file:
+      - .env
+
     # --- Platform (explicit target architecture) ---
     platform: linux/amd64
 
@@ -34,45 +40,17 @@ services:
       # This prevents the app from being directly accessible on the LAN
       - "127.0.0.1:${APP_PORT:-3000}:3000"
 
-    # --- Environment Variables ---
+    # --- Environment Overrides ---
+    # Hanya nilai yang spesifik untuk container (override .env).
+    # Semua variabel lain (SECRET_KEY, APP_ENV, CORS_*, LMS_*, BROWSER_*,
+    # SESSION_*, PHOTO_*, MAX_*, TZ, AUTO_LOGIN, dll) dibawa oleh env_file.
     environment:
-      # Server
-      APP_NAME: lonceng_unman_be
-      APP_ENV: ${APP_ENV:-production}
       APP_PORT: "3000"
       APP_HOST: "0.0.0.0"
-
-      # CORS — restrict in production to only your domain
-      # Example: "https://yourdomain.com,https://www.yourdomain.com"
-      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
-      CORS_ALLOW_METHODS: ${CORS_ALLOW_METHODS:-GET,POST,OPTIONS}
-      CORS_ALLOW_HEADERS: ${CORS_ALLOW_HEADERS:-Content-Type}
-
-      # LMS Browser Automation
-      LMS_BASE_URL: ${LMS_BASE_URL:-https://elearning.universitasmandiri.ac.id}
-      LMS_DASHBOARD_URL: ${LMS_DASHBOARD_URL:-https://elearning.universitasmandiri.ac.id/admin/}
-      BROWSER_HEADLESS: "true"
-      BROWSER_TIMEOUT: ${BROWSER_TIMEOUT:-60s}
-      DNS_TIMEOUT: ${DNS_TIMEOUT:-5s}
-
-      # Persistent Paths (inside container)
+      # Container-specific paths (berbeda dari .env development)
       DOWNLOAD_DIR: /data/downloads
       EXTRACT_DIR: /data/extracted
       PROFILE_BASE_DIR: /data/profiles
-
-      # Session Management
-      SESSION_TTL: ${SESSION_TTL:-15m}
-      MAX_SESSIONS: ${MAX_SESSIONS:-15}
-
-      # Photo Cache
-      PHOTO_CACHE_TTL: ${PHOTO_CACHE_TTL:-15m}
-
-      # Limits
-      MAX_BODY_SIZE: ${MAX_BODY_SIZE:-1MB}
-      MAX_PDF_SIZE: ${MAX_PDF_SIZE:-50MB}
-
-      # Timezone (important for time-based operations)
-      TZ: ${TZ:-Asia/Jakarta}
 
     # --- DNS Configuration ---
     # Use reliable public DNS for LMS domain resolution

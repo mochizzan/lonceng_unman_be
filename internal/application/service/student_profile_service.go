@@ -58,6 +58,7 @@ func (s *studentProfileService) Scrape(req entity.StudentProfileRequest) (*entit
 	// 1. Get or create session (auto-login)
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
+		fmt.Printf("[SERVICE] GetOrCreate failed: %v\n", err)
 		return nil, fmt.Errorf("get session: %w", err)
 	}
 	defer session.Close()
@@ -65,6 +66,7 @@ func (s *studentProfileService) Scrape(req entity.StudentProfileRequest) (*entit
 	// 2. Scrape profile (pass base URL for full navigation)
 	profile, err := s.scraper.Scrape(session, s.cfg.App.LMSBaseURL, s.cfg)
 	if err != nil {
+		fmt.Printf("[SERVICE] Scrape failed: %v\n", err)
 		return nil, fmt.Errorf("scrape profile: %w", err)
 	}
 

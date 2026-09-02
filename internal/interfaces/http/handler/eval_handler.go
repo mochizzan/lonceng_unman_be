@@ -173,7 +173,7 @@ func (h *EvalHandler) Student(c fiber.Ctx) error {
 
 	dashData := map[string]interface{}{
 		"Title":      "Detail " + npm,
-		"ActivePage": "detail",
+		"ActivePage": "student",
 		"Breadcrumbs": []Breadcrumb{
 			{Label: "Dashboard", URL: "/eval"},
 			{Label: npm},
@@ -301,7 +301,7 @@ func (h *EvalHandler) EditKRS(c fiber.Ctx) error {
 
 	dashData := map[string]interface{}{
 		"Title":      "Edit GT KRS - " + npm,
-		"ActivePage": "edit",
+		"ActivePage": "krs",
 		"Breadcrumbs": []Breadcrumb{
 			{Label: "Dashboard", URL: "/eval"},
 			{Label: npm, URL: "/eval/" + npm},
@@ -328,7 +328,7 @@ func (h *EvalHandler) EditKHS(c fiber.Ctx) error {
 
 	dashData := map[string]interface{}{
 		"Title":      "Edit GT KHS - " + npm,
-		"ActivePage": "edit",
+		"ActivePage": "khs",
 		"Breadcrumbs": []Breadcrumb{
 			{Label: "Dashboard", URL: "/eval"},
 			{Label: npm, URL: "/eval/" + npm},
@@ -792,16 +792,33 @@ func (h *EvalHandler) loadPDFBase64(npm, docType, filename string) (string, PDFP
 	return "", info
 }
 
-// parseGT parses GT JSON into a map for template consumption.
-func parseGT(data []byte, docType string) map[string]interface{} {
-	result := make(map[string]interface{})
+// GTData holds the parsed GT for template rendering.
+// Using strongly-typed structs eliminates case-sensitivity issues with
+// map[string]interface{} and provides compile-time type safety.
+type GTData struct {
+	KRS *entity.KRSExtraction `json:"-"`
+	KHS *entity.KHSExtraction `json:"-"`
+}
+
+// parseGT parses GT JSON into a strongly-typed struct for template consumption.
+func parseGT(data []byte, docType string) GTData {
+	var gt GTData
 	if len(data) == 0 {
-		return result
+		return gt
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return make(map[string]interface{})
+	switch docType {
+	case "krs":
+		var krs entity.KRSExtraction
+		if err := json.Unmarshal(data, &krs); err == nil {
+			gt.KRS = &krs
+		}
+	case "khs":
+		var khs entity.KHSExtraction
+		if err := json.Unmarshal(data, &khs); err == nil {
+			gt.KHS = &khs
+		}
 	}
-	return result
+	return gt
 }
 
 // replaceJSONWithPDF replaces .json suffix with .pdf (or removes suffix).

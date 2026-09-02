@@ -30,18 +30,32 @@ const (
 	gracePeriod = 5 * time.Minute
 )
 
-// cachedSession holds an authenticated browser session for a single NPM.
+// cachedSession holds an authenticated browser for a single NPM.
+//
+// Architecture: The browser maintains authentication state (cookies via
+// UserDataDir). Each request creates a fresh rod.Page from the browser
+// via browser.Page("about:blank"). This avoids the "stale page state" bug
+// where reusing a single page across requests caused subsequent navigations
+// to fail immediately (3-10ms) after the first successful scrape.
+//
 // activeCount tracks how many request goroutines currently hold a rodSession
 // derived from this cachedSession. Eviction and cleanup must not close a
 // session whose activeCount > 0.
 type cachedSession struct {
-	page        *rod.Page
+	npm         string
 	browser     *browserInfra.Browser
 	createdAt   time.Time
 	lastUsed    time.Time
-	mu          sync.Mutex // guards page, lastUsed, AND activeCount
+	mu          sync.Mutex // guards lastUsed, AND activeCount
+	pageMu      sync.Mutex // serializes browser.Page() calls
 	activeCount int32      // protected by mu, NOT atomic
+	pageCount   int32      // number of open pages
 }
+
+// maxPagesPerBrowser limits the number of pages that can be open in a
+// single browser instance. When this limit is exceeded, the browser is
+// considered corrupted and a new session must be created.
+const maxPagesPerBrowser = 10
 
 // Manager is an in-memory session cache keyed by NPM.
 // It is safe for concurrent use by multiple goroutines.
@@ -119,12 +133,11 @@ func (m *Manager) SessionCount() int {
 
 // InjectTestSession adds a session directly to the cache for testing purposes.
 // It bypasses the normal creation flow and does not enforce MaxSessions.
-func (m *Manager) InjectTestSession(npm string, browser *browserInfra.Browser, page *rod.Page) {
+func (m *Manager) InjectTestSession(npm string, browser *browserInfra.Browser, _ *rod.Page) {
 	now := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions[npm] = &cachedSession{
-		page:      page,
 		browser:   browser,
 		createdAt: now,
 		lastUsed:  now,
@@ -213,7 +226,6 @@ func (m *Manager) createSessionWithRestore(npm, password string, profileDir stri
 	slog.Info("restored session validated successfully", "npm", npm)
 	now := time.Now()
 	return &cachedSession{
-		page:      page,
 		browser:   br,
 		createdAt: now,
 		lastUsed:  now,
@@ -222,6 +234,13 @@ func (m *Manager) createSessionWithRestore(npm, password string, profileDir stri
 
 // GetOrCreate returns an existing valid session for the NPM,
 // or creates a new one by logging in with the provided credentials.
+//
+// Each call creates a fresh rod.Page from the shared browser. The browser
+// maintains authentication state (cookies via UserDataDir), so each new
+// page is automatically authenticated.
+//
+// If the browser is corrupted (too many open pages, context deadline exceeded),
+// the session is evicted and a new one is created.
 func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error) {
 	// Fast path: read-only check (concurrent across all NPMs).
 	m.mu.RLock()
@@ -237,7 +256,14 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 			sess.activeCount++
 			sess.mu.Unlock()
 			slog.Info("session reused", "npm", npm)
-			return newSession(sess), nil
+			newSess, err := newSession(sess)
+			if err != nil {
+				// Session is corrupted, evict and retry.
+				slog.Warn("session corrupted, evicting", "npm", npm, "error", err)
+				m.evictSession(npm)
+				return m.createNewSession(npm, password)
+			}
+			return newSess, nil
 		}
 		sess.mu.Unlock()
 	}
@@ -261,7 +287,14 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 			sess.activeCount++
 			sess.mu.Unlock()
 			slog.Info("session reused (double-check)", "npm", npm)
-			return newSession(sess), nil
+			newSess, err := newSession(sess)
+			if err != nil {
+				// Session is corrupted, evict and retry.
+				slog.Warn("session corrupted, evicting", "npm", npm, "error", err)
+				m.evictSession(npm)
+				return m.createNewSession(npm, password)
+			}
+			return newSess, nil
 		}
 		sess.mu.Unlock()
 	}
@@ -276,6 +309,11 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 		m.mu.Unlock()
 	}
 
+	return m.createNewSession(npm, password)
+}
+
+// createNewSession enforces max sessions, creates a new session, and stores it.
+func (m *Manager) createNewSession(npm, password string) (port.BrowserSession, error) {
 	// Enforce max sessions limit.
 	if m.cfg.App.MaxSessions > 0 {
 		m.mu.RLock()
@@ -300,6 +338,7 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 	}
 
 	var err error
+	var sess *cachedSession
 	if _, statErr := os.Stat(profileDir); statErr == nil {
 		sess, err = m.createSessionWithRestore(npm, password, profileDir)
 	} else {
@@ -316,7 +355,28 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 	m.mu.Unlock()
 
 	sess.activeCount = 1 // Set directly since session is brand new
-	return newSession(sess), nil
+	newSess, err := newSession(sess)
+	if err != nil {
+		return nil, err
+	}
+	return newSess, nil
+}
+
+// evictSession removes a specific NPM session from the cache.
+func (m *Manager) evictSession(npm string) {
+	m.mu.Lock()
+	sess, ok := m.sessions[npm]
+	if ok {
+		delete(m.sessions, npm)
+	}
+	m.mu.Unlock()
+
+	if ok {
+		sess.mu.Lock()
+		_ = sess.browser.Close()
+		sess.mu.Unlock()
+		slog.Info("session evicted", "npm", npm)
+	}
 }
 
 // Close releases the session for the given NPM.
@@ -404,9 +464,24 @@ func (m *Manager) checkDNS(rawURL string) error {
 //
 // DNS pre-flight is performed at GetOrCreate top-level (single call). This
 // function only handles browser launch + login form submission.
+//
+// The login page is intentionally NOT closed after successful login.
+// Closing the login page before cookies are fully persisted to the
+// UserDataDir profile causes subsequent pages to lose authentication
+// and redirect to the login page. Instead, we keep the login page open
+// and create fresh pages for each request via browser.Page("about:blank").
+// The browser maintains authentication state via the shared profile, so
+// new pages are automatically authenticated once cookies are persisted.
 func (m *Manager) createSession(npm, password string) (*cachedSession, error) {
 	br := m.browserFactory()
-	if err := br.Connect(m.cfg.App.BrowserHeadless); err != nil {
+
+	// Use persistent profile so cookies survive browser restarts.
+	profileDir := m.profileDir(npm)
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create profile dir: %w", err)
+	}
+
+	if err := br.ConnectWithProfile(m.cfg.App.BrowserHeadless, profileDir); err != nil {
 		return nil, fmt.Errorf("browser connect: %w", err)
 	}
 
@@ -428,9 +503,16 @@ func (m *Manager) createSession(npm, password string) (*cachedSession, error) {
 
 	slog.Info("login successful", "npm", npm)
 
+	// Do NOT close the login page. The browser's cookie jar is shared
+	// across all pages in the same browser instance, but cookies may
+	// not be fully persisted until the page is kept open. Closing the
+	// login page can cause subsequent pages to lose authentication.
+	// The login page will be closed when the browser is closed during
+	// session eviction.
+
 	now := time.Now()
 	return &cachedSession{
-		page:      page,
+		npm:       npm,
 		browser:   br,
 		createdAt: now,
 		lastUsed:  now,

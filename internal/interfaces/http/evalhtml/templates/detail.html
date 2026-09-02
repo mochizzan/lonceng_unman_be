@@ -112,6 +112,9 @@
                             <div class="d-flex align-items-center gap-2">
                                 <span class="badge bg-secondary-subtle text-secondary-emphasis">{{$doc.File}}</span>
                                 {{if $doc.Paired}}
+                                <a href="/eval/{{$.NPM}}/krs/{{$doc.File}}/edit" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-pencil"></i> Edit GT
+                                </a>
                                 <button class="btn btn-sm btn-link compare-toggle collapsed"
                                         type="button"
                                         data-bs-toggle="collapse"
@@ -241,6 +244,9 @@
                             <div class="d-flex align-items-center gap-2">
                                 <span class="badge bg-secondary-subtle text-secondary-emphasis">{{$doc.File}}</span>
                                 {{if $doc.Paired}}
+                                <a href="/eval/{{$.NPM}}/khs/{{$doc.File}}/edit" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-pencil"></i> Edit GT
+                                </a>
                                 <button class="btn btn-sm btn-link compare-toggle collapsed"
                                         type="button"
                                         data-bs-toggle="collapse"

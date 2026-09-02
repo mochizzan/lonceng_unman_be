@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,26 +11,58 @@ import (
 	"github.com/go-rod/rod"
 )
 
+// pageTimeout bounds individual page operations so that a hung operation
+// (e.g., WaitLoad on a corrupted page) returns an error instead of blocking
+// forever. This prevents deadlocks when page operations fail.
+// Set to 60s to match the maximum probe timeout for slow LMS responses.
+const pageTimeout = 60 * time.Second
+
 // rodSession implements port.BrowserSession using a go-rod page.
-// Each page operation is serialized via mu to prevent concurrent
-// access to the shared rod.Page from multiple request goroutines.
-// The activeCount on cachedSession tracks whether any rodSession
-// is still in use, preventing eviction during active requests.
+//
+// Architecture: Each rodSession holds its own rod.Page, freshly created
+// from the shared browser. The browser maintains authentication state
+// (cookies via UserDataDir), so each new page is automatically authenticated.
+//
+// Concurrency: The cachedSession.pageMu serializes browser.Page() calls
+// because go-rod's browser.Page() is not concurrent-safe. Each rodSession
+// has its own mutex for page operations, so different rodSessions
+// (different requests) can operate concurrently because each has its own
+// page and its own mutex.
 type rodSession struct {
 	page       *rod.Page
-	mu         *sync.Mutex    // shared with cachedSession; serializes page ops
+	mu         sync.Mutex     // per-session mutex for this rodSession's page ops
 	cachedSess *cachedSession // back-reference for release tracking
 	closed     bool           // prevents double-decrement of activeCount
 }
 
-// newSession wraps a cachedSession's page into a BrowserSession.
-// The caller must not use cachedSess.page directly after this call.
-func newSession(cachedSess *cachedSession) *rodSession {
-	return &rodSession{
-		page:       cachedSess.page,
-		mu:         &cachedSess.mu,
-		cachedSess: cachedSess,
+// newSession creates a fresh page from the browser and wraps it in a rodSession.
+// The pageMu is held during page creation to serialize browser.Page() calls.
+// Returns an error if the browser has too many open pages (resource exhaustion).
+func newSession(cachedSess *cachedSession) (*rodSession, error) {
+	cachedSess.pageMu.Lock()
+
+	// Check if browser has too many open pages.
+	if cachedSess.pageCount >= maxPagesPerBrowser {
+		cachedSess.pageMu.Unlock()
+		return nil, fmt.Errorf("browser has too many open pages (%d >= %d) — session corrupted, please retry", cachedSess.pageCount, maxPagesPerBrowser)
 	}
+
+	fmt.Printf("[SESSION] Creating new page for npm=%s (pageCount=%d)\n", cachedSess.npm, cachedSess.pageCount)
+	page, err := cachedSess.browser.Page("about:blank")
+	if err == nil {
+		cachedSess.pageCount++
+	}
+	fmt.Printf("[SESSION] Page created: err=%v, pageCount=%d\n", err, cachedSess.pageCount)
+	cachedSess.pageMu.Unlock()
+
+	if err != nil {
+		return nil, fmt.Errorf("create new page: %w", err)
+	}
+
+	return &rodSession{
+		page:       page,
+		cachedSess: cachedSess,
+	}, nil
 }
 
 // touchLastUsed updates the lastUsed timestamp of the cached session.
@@ -39,31 +72,68 @@ func (s *rodSession) touchLastUsed() {
 }
 
 // Navigate loads the given URL and waits for the page to be ready.
-// It acquires the session mutex so only one request uses the page at a time.
+// It retries on timeout errors and resets page state via about:blank
+// to avoid the "stale page" issue where subsequent navigations fail.
 func (s *rodSession) Navigate(url string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.touchLastUsed()
 
-	if err := s.page.Navigate(url); err != nil {
-		return fmt.Errorf("navigate to %s: %w", url, err)
+	// Reset page state by navigating to about:blank first.
+	// This prevents the "context deadline exceeded" error that occurs
+	// when a page is reused after the previous page was closed.
+	page := s.page.Timeout(pageTimeout)
+	if err := page.Navigate("about:blank"); err != nil {
+		return fmt.Errorf("reset page state: %w", err)
 	}
-	if err := s.page.WaitLoad(); err != nil {
-		return fmt.Errorf("wait load %s: %w", url, err)
+
+	// Retry navigation up to 3 times on timeout errors.
+	// The LMS server can be slow to respond, especially on subsequent
+	// requests after a previous page was closed.
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			// Wait before retry to let the server recover.
+			time.Sleep(time.Duration(attempt) * time.Second)
+			// Reset page state again before retry.
+			_ = s.page.Timeout(pageTimeout).Navigate("about:blank")
+		}
+
+		page := s.page.Timeout(pageTimeout)
+		if err := page.Navigate(url); err != nil {
+			lastErr = fmt.Errorf("navigate to %s (attempt %d): %w", url, attempt+1, err)
+			// Check if this is a timeout error that we should retry.
+			if strings.Contains(err.Error(), "context deadline exceeded") ||
+				strings.Contains(err.Error(), "timeout") {
+				continue
+			}
+			// Non-timeout error, don't retry.
+			return lastErr
+		}
+		if err := page.WaitLoad(); err != nil {
+			lastErr = fmt.Errorf("wait load %s (attempt %d): %w", url, attempt+1, err)
+			if strings.Contains(err.Error(), "context deadline exceeded") ||
+				strings.Contains(err.Error(), "timeout") {
+				continue
+			}
+			return lastErr
+		}
+		// Success.
+		return nil
 	}
-	return nil
+	return fmt.Errorf("navigate to %s failed after 3 attempts: %w", url, lastErr)
 }
 
 // Eval executes JavaScript on the page and returns the result as a string.
-// It acquires the session mutex so only one request uses the page at a time.
 func (s *rodSession) Eval(js string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.touchLastUsed()
 
-	result, err := s.page.Eval(js)
+	page := s.page.Timeout(pageTimeout)
+	result, err := page.Eval(js)
 	if err != nil {
 		return "", fmt.Errorf("eval js: %w", err)
 	}
@@ -71,20 +141,20 @@ func (s *rodSession) Eval(js string) (string, error) {
 }
 
 // ElementAttribute returns the value of an attribute on the first element matching the selector.
-// It acquires the session mutex so only one request uses the page at a time.
 func (s *rodSession) ElementAttribute(selector, attr string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.touchLastUsed()
 
-	el, err := s.page.Element(selector)
+	page := s.page.Timeout(pageTimeout)
+	el, err := page.Element(selector)
 	if err != nil {
-		return "", fmt.Errorf("find element %s: %w", selector, err)
+		return "", fmt.Errorf("find element %s: %w", err)
 	}
 	val, err := el.Attribute(attr)
 	if err != nil {
-		return "", fmt.Errorf("get attribute %s: %w", attr, err)
+		return "", fmt.Errorf("get attribute %s: %w", err)
 	}
 	if val == nil {
 		return "", fmt.Errorf("attribute %s is nil on %s", attr, selector)
@@ -93,16 +163,15 @@ func (s *rodSession) ElementAttribute(selector, attr string) (string, error) {
 }
 
 // ElementExists returns true if an element matching the selector exists on the page.
-// It acquires the session mutex so only one request uses the page at a time.
 func (s *rodSession) ElementExists(selector string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.touchLastUsed()
 
-	_, err := s.page.Element(selector)
+	page := s.page.Timeout(pageTimeout)
+	_, err := page.Element(selector)
 	if err != nil {
-		// go-rod returns error when element not found
 		return false, nil
 	}
 	return true, nil
@@ -114,32 +183,30 @@ func (s *rodSession) ElementHref(selector string) (string, error) {
 }
 
 // DownloadPDF downloads a PDF from the given URL and saves it to savePath.
-// Delegates to browser.DownloadAndSave for the actual fetch and file I/O.
-// It acquires the session mutex so only one request uses the page at a time.
 func (s *rodSession) DownloadPDF(url, savePath string) (string, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.touchLastUsed()
 
-	return browser.DownloadAndSave(s.page, url, savePath)
+	page := s.page.Timeout(pageTimeout)
+	return browser.DownloadAndSave(page, url, savePath)
 }
 
 // DownloadImage downloads an image from the given URL and saves it to savePath.
-// Delegates to browser.DownloadImage for the actual fetch and file I/O.
 func (s *rodSession) DownloadImage(url, savePath string) (string, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.touchLastUsed()
 
-	return browser.DownloadImage(s.page, url, savePath)
+	page := s.page.Timeout(pageTimeout)
+	return browser.DownloadImage(page, url, savePath)
 }
 
-// Close signals that this session holder is done with the browser session,
-// decrementing the active use count so the session can be evicted if needed.
-// The underlying browser and page are managed by the session manager.
-// It is safe to call Close multiple times; subsequent calls are no-ops.
+// Close closes the page and signals that this session holder is done with
+// the browser session, decrementing the active use count so the session
+// can be evicted if needed. It is safe to call Close multiple times.
 func (s *rodSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -147,6 +214,31 @@ func (s *rodSession) Close() error {
 		return nil
 	}
 	s.closed = true
+
+	// Close the page to free browser resources.
+	// Without this, the browser accumulates pages and eventually
+	// fails with "context deadline exceeded" when creating new pages.
+	if s.page != nil {
+		pageTimeout := 5 * time.Second
+		done := make(chan error, 1)
+		go func() {
+			done <- s.page.Close()
+		}()
+		select {
+		case err := <-done:
+			if err != nil {
+				fmt.Printf("[SESSION] Page close error: %v\n", err)
+			}
+		case <-time.After(pageTimeout):
+			fmt.Printf("[SESSION] Page close timed out after %v\n", pageTimeout)
+		}
+		// Decrement page count.
+		s.cachedSess.pageMu.Lock()
+		s.cachedSess.pageCount--
+		fmt.Printf("[SESSION] Page closed, pageCount=%d\n", s.cachedSess.pageCount)
+		s.cachedSess.pageMu.Unlock()
+	}
+
 	if s.cachedSess.activeCount > 0 {
 		s.cachedSess.activeCount--
 	}

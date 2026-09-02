@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 
 	"lonceng_unman_be/internal/apperror"
 	"lonceng_unman_be/internal/application/service"
@@ -107,4 +110,39 @@ func (h *DocumentHandler) DownloadKHS(c fiber.Ctx) error {
 	}
 
 	return response.Success(c, fiber.StatusOK, result, result.Message)
+}
+
+// DownloadKHSFile handles POST /api/v1/lms/khs/file
+func (h *DocumentHandler) DownloadKHSFile(c fiber.Ctx) error {
+	var req entity.KHSDownloadRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return apperror.BadRequest("invalid request body")
+	}
+	if err := validateNPM(req.NPM); err != nil {
+		return err
+	}
+	if req.Password == "" {
+		return apperror.BadRequest("password is required")
+	}
+	if req.TahunAjaran == "" {
+		return apperror.BadRequest("tahun_ajaran is required")
+	}
+	if req.Semester == "" {
+		return apperror.BadRequest("semester is required")
+	}
+
+	filePath, size, err := h.docService.DownloadKHSFile(req)
+	if err != nil {
+		return err
+	}
+
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", fmt.Sprintf(
+		`attachment; filename="KHS_%s_%s_%s.pdf"`,
+		req.NPM, strings.ReplaceAll(req.TahunAjaran, "/", "_"), req.Semester,
+	))
+	c.Set("Content-Length", strconv.FormatInt(size, 10))
+	c.Set("Accept-Ranges", "bytes")
+
+	return c.SendFile(filePath)
 }

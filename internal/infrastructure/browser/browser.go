@@ -153,8 +153,7 @@ func (b *Browser) Connect(headless bool) error {
 // The profile preserves cookies, localStorage, and IndexedDB across restarts.
 // Close() will NOT call launcher.Cleanup() — the profile directory persists.
 //
-// Same flag policy as Connect() — see comment above. Profile-specific cache
-// flags are still applied AFTER ROD_FLAGS so they always take effect.
+// Same flag policy as Connect() — see comment above.
 func (b *Browser) ConnectWithProfile(headless bool, profileDir string) error {
 	cleanStaleLock(profileDir)
 
@@ -172,10 +171,7 @@ func (b *Browser) ConnectWithProfile(headless bool, profileDir string) error {
 		Set(flags.Flag("disable-extensions")).
 		Set(flags.Flag("no-first-run")).
 		Set(flags.Flag("no-default-browser-check")).
-		Set(flags.Flag("disable-background-networking")).
-		Set(flags.Flag("disable-http-cache")).
-		Set(flags.Flag("disk-cache-size=0")).
-		Set(flags.Flag("media-cache-size=0"))
+		Set(flags.Flag("disable-background-networking"))
 
 	if extra := parseRodFlags(); len(extra) > 0 {
 		l = launcher.New().
@@ -185,11 +181,6 @@ func (b *Browser) ConnectWithProfile(headless bool, profileDir string) error {
 		for _, f := range extra {
 			l = l.Set(flags.Flag(f))
 		}
-		// Cache-control flags always-on for profile-backed sessions.
-		l = l.
-			Set(flags.Flag("disable-http-cache")).
-			Set(flags.Flag("disk-cache-size=0")).
-			Set(flags.Flag("media-cache-size=0"))
 	}
 
 	if bin := browserBinPath(); bin != "" {

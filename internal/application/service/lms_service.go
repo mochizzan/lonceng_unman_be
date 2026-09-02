@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"lonceng_unman_be/internal/apperror"
 	"lonceng_unman_be/internal/config"
 	"lonceng_unman_be/internal/domain/entity"
 	"lonceng_unman_be/internal/domain/port"
@@ -42,6 +44,9 @@ type LMSDocumentService interface {
 
 	// DownloadKHS downloads the KHS PDF for a specific semester.
 	DownloadKHS(req entity.KHSDownloadRequest) (*entity.KHSDownloadResult, error)
+
+	// DownloadKHSFile serves an already-downloaded KHS PDF file as binary data.
+	DownloadKHSFile(req entity.KHSDownloadRequest) (string, int64, error)
 }
 
 // lmsDocumentService implements LMSDocumentService.
@@ -241,4 +246,32 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 		Size:        size,
 		Timestamp:   time.Now(),
 	}, nil
+}
+
+// DownloadKHSFile serves an already-downloaded KHS PDF file as binary data.
+func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (string, int64, error) {
+	req.Semester = strings.ToUpper(req.Semester)
+	if !entity.ValidSemester(req.Semester) {
+		return "", 0, apperror.BadRequest("semester must be GANJIL or GENAP")
+	}
+
+	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
+	if err != nil {
+		return "", 0, fmt.Errorf("get session: %w", err)
+	}
+	defer session.Close()
+
+	filePath := filepath.Join(s.cfg.App.DownloadDir, req.NPM, "khs",
+		entity.KHSFilename(req.TahunAjaran, req.Semester))
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", 0, apperror.NotFound("KHS PDF not found for the specified year and semester", err)
+		}
+		return "", 0, apperror.Internal("failed to stat PDF file", err)
+	}
+
+	slog.Info("serving KHS file", "npm", req.NPM, "path", filePath, "size", info.Size())
+	return filePath, info.Size(), nil
 }
