@@ -61,7 +61,7 @@ RUN ln -sf /usr/bin/chromium-browser /usr/bin/chromium \
     && ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome
 
 # Create application directories
-RUN mkdir -p /app /data/downloads /data/extracted /data/profiles \
+RUN mkdir -p /app /data/downloads /data/extracted /data/profiles /data/eval/ground_truth \
     && chown -R appuser:appuser /app /data
 
 WORKDIR /app
@@ -84,6 +84,7 @@ ENV APP_ENV=production \
     BROWSER_HEADLESS=true \
     DOWNLOAD_DIR=/data/downloads \
     EXTRACT_DIR=/data/extracted \
+    EVAL_DIR=/data/eval/ground_truth \
     PROFILE_BASE_DIR=/data/profiles \
     ROD_BROWSER=/usr/bin/chromium-browser \
     TMPDIR=/data/tmp \

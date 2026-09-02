@@ -50,6 +50,7 @@ services:
       # Container-specific paths (berbeda dari .env development)
       DOWNLOAD_DIR: /data/downloads
       EXTRACT_DIR: /data/extracted
+      EVAL_DIR: /data/eval/ground_truth
       PROFILE_BASE_DIR: /data/profiles
 
     # --- DNS Configuration ---
@@ -65,6 +66,7 @@ services:
       - ./downloads:/data/downloads
       - ./extracted:/data/extracted
       - ./profiles:/data/profiles
+      - ./eval/ground_truth:/data/eval/ground_truth
       # Tmpfs for /tmp — RAM-based, faster than disk, auto-cleaned on container stop
       # Used by go-rod leakless binary and Chromium temp files
       - type: tmpfs
