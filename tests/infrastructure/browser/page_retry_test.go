@@ -37,20 +37,20 @@ func TestIsTransientBrowserError(t *testing.T) {
 
 // Test 2: TestPage_BackoffArrayMatchesDesign — verifies backoff array invariant
 func TestPage_BackoffArrayMatchesDesign(t *testing.T) {
-	// Page() declares: const maxAttempts = 3; backoffs := []time.Duration{0, 500ms, 1s}
+	// Page() declares: const maxAttempts = 3; backoffs := []time.Duration{0, 1s, 2s}
 	// We document the invariant here so any future refactor catches a deviation.
-	expectedBackoffs := []time.Duration{0, 500 * time.Millisecond, 1 * time.Second}
+	expectedBackoffs := []time.Duration{0, 1 * time.Second, 2 * time.Second}
 	if len(expectedBackoffs) != 3 {
 		t.Fatalf("design invariant: backoff array must have 3 entries (one per attempt)")
 	}
 	if expectedBackoffs[0] != 0 {
 		t.Errorf("first backoff must be 0 (no sleep before first attempt)")
 	}
-	if expectedBackoffs[1] != 500*time.Millisecond {
-		t.Errorf("second backoff must be 500ms, got %v", expectedBackoffs[1])
+	if expectedBackoffs[1] != 1*time.Second {
+		t.Errorf("second backoff must be 1s, got %v", expectedBackoffs[1])
 	}
-	if expectedBackoffs[2] != 1*time.Second {
-		t.Errorf("third backoff must be 1s, got %v", expectedBackoffs[2])
+	if expectedBackoffs[2] != 2*time.Second {
+		t.Errorf("third backoff must be 2s, got %v", expectedBackoffs[2])
 	}
 	t.Logf("verified backoff schedule: %v (total worst-case: %v)",
 		expectedBackoffs, expectedBackoffs[1]+expectedBackoffs[2])

@@ -228,15 +228,25 @@ func cleanStaleLock(profileDir string) {
 }
 
 // Page opens a new browser tab. Retries 3x with bounded backoff
-// ([0, 500ms, 1s]) on transient CDP errors (EOF, deadline, timeout) —
+// ([0, 1s, 2s]) on transient CDP errors (EOF, deadline, timeout) —
 // addresses the cold-start race where Page() is called before the CDP
-// websocket is fully ready.
+// websocket is fully ready, AND the post-restart race where Chromium
+// is busy rehydrating profile state and individual CDP calls exceed
+// the per-call budget.
+//
+// Backoff schedule chosen after observing real production telemetry
+// (paste-1.md, 2026-09-04): when Page() failed with "context deadline
+// exceeded" on a freshly-restarted container, the CDP round-trip was
+// taking >500ms — the previous schedule (0, 500ms, 1s) gave the
+// browser no breathing room between attempts. Widening to (0, 1s, 2s)
+// keeps total wall-clock under 4s while letting per-attempt CDP ops
+// actually complete.
 //
 // On non-transient errors (context canceled, invalid args), returns
 // immediately — no retry, no backoff.
 func (b *Browser) Page(url string) (*rod.Page, error) {
 	const maxAttempts = 3
-	backoffs := []time.Duration{0, 500 * time.Millisecond, 1 * time.Second}
+	backoffs := []time.Duration{0, 1 * time.Second, 2 * time.Second}
 
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
