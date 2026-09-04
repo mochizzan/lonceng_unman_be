@@ -2,6 +2,7 @@ package browser
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,10 @@ import (
 	"github.com/go-rod/rod/lib/launcher/flags"
 	"github.com/go-rod/rod/lib/proto"
 )
+
+// _ ensures log/slog is treated as used (Task 2 will replace this with
+// real retry logging; removed once slog has real call sites in this file).
+var _ = slog.Default
 
 // chromiumPathCandidates is the ordered list of well-known installed
 // Chromium/Chrome binary paths that we probe BEFORE falling back to
