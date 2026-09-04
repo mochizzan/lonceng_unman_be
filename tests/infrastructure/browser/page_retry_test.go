@@ -1,10 +1,12 @@
-package browser
+package browser_test
 
 import (
 	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"lonceng_unman_be/internal/infrastructure/browser"
 )
 
 // Test 1: TestIsTransientBrowserError — helper covers EOF, deadline, timeout
@@ -25,9 +27,9 @@ func TestIsTransientBrowserError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := isTransientBrowserError(tc.err)
+			got := browser.IsTransientBrowserError(tc.err)
 			if got != tc.expected {
-				t.Errorf("isTransientBrowserError(%v) = %v, want %v", tc.err, got, tc.expected)
+				t.Errorf("IsTransientBrowserError(%v) = %v, want %v", tc.err, got, tc.expected)
 			}
 		})
 	}
@@ -70,19 +72,19 @@ func TestPage_WrappedErrorMentionsAttempts(t *testing.T) {
 // Test 4: TestPage_RetryOnTransientError — verifies retry happens via direct
 // function-field mock on rod.Page. Since Browser.rod is *rod.Browser
 // (concrete type), we use the design's mockable seam: the retry logic
-// uses isTransientBrowserError as the gate, so we test that gate plus
+// uses IsTransientBrowserError as the gate, so we test that gate plus
 // the loop logic indirectly by validating that EOF returns true (retry
 // would fire) while context canceled returns false (no retry).
 func TestPage_RetryOnTransientError(t *testing.T) {
-	transient := isTransientBrowserError(errors.New("EOF"))
+	transient := browser.IsTransientBrowserError(errors.New("EOF"))
 	if !transient {
 		t.Error("EOF must be classified as transient (Page() should retry)")
 	}
-	transient = isTransientBrowserError(errors.New("context deadline exceeded"))
+	transient = browser.IsTransientBrowserError(errors.New("context deadline exceeded"))
 	if !transient {
 		t.Error("context deadline exceeded must be classified as transient")
 	}
-	transient = isTransientBrowserError(errors.New("i/o timeout"))
+	transient = browser.IsTransientBrowserError(errors.New("i/o timeout"))
 	if !transient {
 		t.Error("i/o timeout must be classified as transient")
 	}
@@ -92,15 +94,15 @@ func TestPage_RetryOnTransientError(t *testing.T) {
 // are NOT retried. The helper returns false for "context canceled", which
 // is the gate that breaks the retry loop early.
 func TestPage_NonTransientErrorNoRetry(t *testing.T) {
-	nonTransient := isTransientBrowserError(errors.New("context canceled"))
+	nonTransient := browser.IsTransientBrowserError(errors.New("context canceled"))
 	if nonTransient {
 		t.Error("context canceled must NOT be classified as transient (Page() should fail immediately)")
 	}
-	nonTransient = isTransientBrowserError(errors.New("invalid URL"))
+	nonTransient = browser.IsTransientBrowserError(errors.New("invalid URL"))
 	if nonTransient {
 		t.Error("invalid URL must NOT be classified as transient")
 	}
-	nonTransient = isTransientBrowserError(nil)
+	nonTransient = browser.IsTransientBrowserError(nil)
 	if nonTransient {
 		t.Error("nil error must NOT be classified as transient")
 	}

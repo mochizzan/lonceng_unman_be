@@ -60,10 +60,10 @@ func browserBinPath() string {
 	return ""
 }
 
-// isTransientBrowserError reports whether err is a transient CDP/browser
+// IsTransientBrowserError reports whether err is a transient CDP/browser
 // failure worth retrying (EOF, context deadline, timeout). Non-transient
 // errors (e.g. "context canceled", invalid URL) fail immediately.
-func isTransientBrowserError(err error) bool {
+func IsTransientBrowserError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -252,7 +252,7 @@ func (b *Browser) Page(url string) (*rod.Page, error) {
 			return page, nil
 		}
 		lastErr = err
-		if !isTransientBrowserError(err) {
+		if !IsTransientBrowserError(err) {
 			// Non-transient error — don't retry.
 			break
 		}
