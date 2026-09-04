@@ -31,9 +31,9 @@ func TestColdStart_Defaults_ApplyWhenEnvUnset(t *testing.T) {
 		t.Fatalf("config.New() error = %v", err)
 	}
 
-	// Tier-1: DNS_TIMEOUT default lowered 5s → 2s.
-	if cfg.App.DNSTimeout != 2*time.Second {
-		t.Errorf("DNS_TIMEOUT default = %v, want 2s", cfg.App.DNSTimeout)
+	// Tier-1: DNS_TIMEOUT default raised 2s → 5s (Docker DNS overload).
+	if cfg.App.DNSTimeout != 5*time.Second {
+		t.Errorf("DNS_TIMEOUT default = %v, want 5s", cfg.App.DNSTimeout)
 	}
 
 	// Tier-2 (user override): SESSION_TTL raised 15m → 24h.

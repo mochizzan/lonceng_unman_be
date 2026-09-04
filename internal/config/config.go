@@ -91,11 +91,12 @@ func New() (*Config, error) {
 			LMSDashboardURL: getEnv("LMS_DASHBOARD_URL", "https://elearning.universitasmandiri.ac.id/admin/"),
 			BrowserHeadless: getEnvBool("BROWSER_HEADLESS", true),
 			BrowserTimeout:  getEnvDuration("BROWSER_TIMEOUT", 60*time.Second),
-			// DNS_TIMEOUT default lowered from 5s → 2s: a healthy DNS lookup
-			// resolves in 50-300ms (cached 1-5ms). 2s is the smallest ceiling
-			// that still covers a slow resolver without becoming the cold-start
-			// bottleneck. Operators can raise it if their network is unusual.
-			DNSTimeout:  getEnvDuration("DNS_TIMEOUT", 2*time.Second),
+			// DNS_TIMEOUT default raised from 2s → 5s: telemetry from
+			// tmp/edge-case-stress.mjs shows Docker internal DNS (127.0.0.11:53)
+			// needs 3-5s during heavy concurrent load before the retry (handled
+			// in Manager.CheckDNS) can succeed. Operators can still override with
+			// DNS_TIMEOUT env var.
+			DNSTimeout:  getEnvDuration("DNS_TIMEOUT", 5*time.Second),
 			DownloadDir: getEnv("DOWNLOAD_DIR", "./downloads"),
 			ExtractDir:  getEnv("EXTRACT_DIR", "./extracted"),
 			EvalDir:     getEnv("EVAL_DIR", "./eval/ground_truth"),
