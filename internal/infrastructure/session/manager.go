@@ -333,7 +333,7 @@ func (m *Manager) createNewSession(npm, password string) (port.BrowserSession, e
 	// absorbs the second call but it's still wasted work; more importantly,
 	// we want a fail-fast at the top level so callers see a clear error
 	// instead of two timeouts chained together.
-	if err := m.checkDNS(m.cfg.App.LMSBaseURL); err != nil {
+	if err := m.CheckDNS(m.cfg.App.LMSBaseURL); err != nil {
 		return nil, err
 	}
 
@@ -429,11 +429,32 @@ func (m *Manager) Stop() {
 	close(m.stopCh)
 }
 
-// checkDNS verifies that the LMS hostname resolves before we attempt a
+// IsTransientDNSError reports whether err is a transient DNS failure
+// worth retrying (timeout, no such host, network unreachable). Parse
+// errors and protocol errors fail immediately.
+func IsTransientDNSError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "network is unreachable") ||
+		strings.Contains(msg, "connection refused")
+}
+
+// CheckDNS verifies that the LMS hostname resolves before we attempt a
 // browser connection. A broken DNS resolver (common after PC restart when
 // the OS DNS cache is cleared) would otherwise cause a 30 s timeout
 // inside go-rod with no actionable error message.
-func (m *Manager) checkDNS(rawURL string) error {
+//
+// Docker-internal DNS resolvers are notoriously flaky under high concurrent
+// load, so transient failures (timeout, no such host) are retried up to
+// maxAttempts times. Non-transient failures fail immediately.
+//
+// Exported as CheckDNS so tests in package session_test can exercise
+// retry behavior without breaking encapsulation of unexported fields.
+func (m *Manager) CheckDNS(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("DNS check: invalid LMS URL %q: %w", rawURL, err)
@@ -444,20 +465,35 @@ func (m *Manager) checkDNS(rawURL string) error {
 	if dnsTimeout == 0 {
 		dnsTimeout = 5 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
-	defer cancel()
 
-	resolver := &net.Resolver{}
-	addrs, err := resolver.LookupHost(ctx, host)
-	if err != nil {
-		return fmt.Errorf(
-			"DNS check: cannot resolve LMS host %q: %w. "+
-				"Verify your DNS settings (try setting DNS to 8.8.8.8)",
-			host, err,
-		)
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
+		resolver := &net.Resolver{}
+		addrs, err := resolver.LookupHost(ctx, host)
+		cancel()
+		if err == nil {
+			if attempt > 0 {
+				slog.Debug("DNS resolved after retry",
+					"host", host, "addrs", addrs, "attempt", attempt+1)
+			} else {
+				slog.Debug("DNS resolved", "host", host, "addrs", addrs)
+			}
+			return nil
+		}
+		lastErr = err
+		if !IsTransientDNSError(err) {
+			break
+		}
+		slog.Warn("DNS check transient failure, will retry",
+			"host", host, "attempt", attempt+1, "error", err)
 	}
-	slog.Debug("DNS resolved", "host", host, "addrs", addrs)
-	return nil
+	return fmt.Errorf(
+		"DNS check: cannot resolve LMS host %q after %d attempts: %w. "+
+			"Verify your DNS settings (try setting DNS to 8.8.8.8)",
+		host, maxAttempts, lastErr,
+	)
 }
 
 // createSession launches a browser, logs in, and returns the cached session.
