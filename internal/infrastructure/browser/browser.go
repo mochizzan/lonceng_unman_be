@@ -14,10 +14,6 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
-// _ ensures log/slog is treated as used (Task 2 will replace this with
-// real retry logging; removed once slog has real call sites in this file).
-var _ = slog.Default
-
 // chromiumPathCandidates is the ordered list of well-known installed
 // Chromium/Chrome binary paths that we probe BEFORE falling back to
 // go-rod's auto-download. Setting ROD_BROWSER still wins (highest priority).
@@ -62,6 +58,19 @@ func browserBinPath() string {
 		}
 	}
 	return ""
+}
+
+// isTransientBrowserError reports whether err is a transient CDP/browser
+// failure worth retrying (EOF, context deadline, timeout). Non-transient
+// errors (e.g. "context canceled", invalid URL) fail immediately.
+func isTransientBrowserError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "deadline") ||
+		strings.Contains(msg, "timeout")
 }
 
 // parseRodFlags returns the parsed launcher flags from ROD_FLAGS env var.
@@ -218,13 +227,40 @@ func cleanStaleLock(profileDir string) {
 	}
 }
 
-// Page opens a new page and navigates to the given URL.
+// Page opens a new browser tab. Retries 3x with bounded backoff
+// ([0, 500ms, 1s]) on transient CDP errors (EOF, deadline, timeout) —
+// addresses the cold-start race where Page() is called before the CDP
+// websocket is fully ready.
+//
+// On non-transient errors (context canceled, invalid args), returns
+// immediately — no retry, no backoff.
 func (b *Browser) Page(url string) (*rod.Page, error) {
-	page, err := b.rod.Page(proto.TargetCreateTarget{URL: url})
-	if err != nil {
-		return nil, fmt.Errorf("open page %s: %w", url, err)
+	const maxAttempts = 3
+	backoffs := []time.Duration{0, 500 * time.Millisecond, 1 * time.Second}
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if backoffs[attempt] > 0 {
+			time.Sleep(backoffs[attempt])
+		}
+		page, err := b.rod.Page(proto.TargetCreateTarget{URL: url})
+		if err == nil {
+			if attempt > 0 {
+				slog.Debug("Page() succeeded after retry",
+					"url", url, "attempt", attempt+1)
+			}
+			return page, nil
+		}
+		lastErr = err
+		if !isTransientBrowserError(err) {
+			// Non-transient error — don't retry.
+			break
+		}
+		slog.Warn("Page() transient failure, will retry",
+			"url", url, "attempt", attempt+1, "error", err)
 	}
-	return page, nil
+	return nil, fmt.Errorf("open page %s after %d attempts: %w",
+		url, maxAttempts, lastErr)
 }
 
 // Close gracefully shuts down the browser and cleans up the launcher.
