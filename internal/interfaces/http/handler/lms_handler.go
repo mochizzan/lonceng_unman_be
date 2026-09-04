@@ -20,6 +20,17 @@ func NewLMSHandler(lmsService service.LMSLogin) *LMSHandler {
 }
 
 // Login handles POST /api/v1/lms/login.
+//
+// The service returns the appropriate HTTP status:
+//   - 200 OK                    → credentials valid, session established
+//   - 401 Unauthorized          → LMS rejected the credentials
+//   - 503 Service Unavailable   → browser / network / CDP failure (transient)
+//   - 500 Internal Server Error → unexpected programmer error
+//
+// Previously, infrastructure failures (e.g. "open login page: EOF" on cold
+// start) were returned as 401 "Username atau password salah", which made
+// debugging very confusing — users and operators couldn't distinguish a
+// bad password from a broken browser session.
 func (h *LMSHandler) Login(c fiber.Ctx) error {
 	var req entity.LoginRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -33,14 +44,14 @@ func (h *LMSHandler) Login(c fiber.Ctx) error {
 		return apperror.BadRequest("password is required")
 	}
 
-	result, err := h.lmsService.Login(req)
+	result, status, err := h.lmsService.Login(req)
 	if err != nil {
 		return apperror.Internal("login operation failed", err)
 	}
 
 	if !result.Success {
-		return response.Error(c, fiber.StatusUnauthorized, result.Message, nil)
+		return response.Error(c, status, result.Message, nil)
 	}
 
-	return response.Success(c, fiber.StatusOK, result, result.Message)
+	return response.Success(c, status, result, result.Message)
 }

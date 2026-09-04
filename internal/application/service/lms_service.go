@@ -13,14 +13,22 @@ import (
 	"lonceng_unman_be/internal/config"
 	"lonceng_unman_be/internal/domain/entity"
 	"lonceng_unman_be/internal/domain/port"
+
+	"github.com/gofiber/fiber/v3"
 )
 
 // LMSLogin defines the contract for LMS login operations.
 type LMSLogin interface {
 	// Login validates credentials by attempting a session creation.
-	// Returns success/failure as a business outcome (nil error for both).
-	// Returns error only for infrastructure failures.
-	Login(req entity.LoginRequest) (*entity.LoginResult, error)
+	// Returns three values:
+	//   - result: business outcome (success or failure) — never nil.
+	//   - httpStatus: the recommended HTTP status code for this outcome.
+	//     200 for success, 401 for credential failure (verified by LMS),
+	//     503 for infrastructure failure (browser/CDP/DNS/network).
+	//   - err: non-nil only for unexpected programmer errors (panic recovery).
+	//     Infrastructure and credential failures are normal outcomes and
+	//     must be communicated through (result, httpStatus), NOT through err.
+	Login(req entity.LoginRequest) (result *entity.LoginResult, httpStatus int, err error)
 }
 
 // lmsService implements LMSLogin.
@@ -61,17 +69,19 @@ func NewLMSDocumentService(cfg *config.Config, sessions port.SessionManager) LMS
 }
 
 // Login validates credentials by creating a session. The session is cached
-// for subsequent requests. Returns success/failure as business outcomes.
-func (s *lmsService) Login(req entity.LoginRequest) (*entity.LoginResult, error) {
+// for subsequent requests. Returns a business outcome and the HTTP status
+// the handler should use.
+//
+// Error classification (drives the returned httpStatus):
+//   - nil err     → success, httpStatus = 200
+//   - credential failure (LMS rejected the credentials) → httpStatus = 401
+//   - infrastructure failure (browser/CDP/DNS/network) → httpStatus = 503
+//   - non-nil err → unexpected programmer error, httpStatus = 500
+func (s *lmsService) Login(req entity.LoginRequest) (*entity.LoginResult, int, error) {
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
 		slog.Warn("login failed", "npm", req.NPM, "error", err)
-		return &entity.LoginResult{
-			Success:   false,
-			Message:   "Username atau password salah",
-			NPM:       req.NPM,
-			Timestamp: time.Now(),
-		}, nil
+		return classifyLoginResult(req.NPM, err)
 	}
 	defer session.Close()
 
@@ -81,7 +91,142 @@ func (s *lmsService) Login(req entity.LoginRequest) (*entity.LoginResult, error)
 		Message:   "Login successful",
 		NPM:       req.NPM,
 		Timestamp: time.Now(),
-	}, nil
+	}, fiber.StatusOK, nil
+}
+
+// classifyLoginResult converts a session-creation error into a user-facing
+// outcome + HTTP status. It distinguishes infrastructure failures (which
+// the user should retry) from credential failures (which they should fix).
+//
+// The previous implementation conflated both cases into "Username atau
+// password salah" (HTTP 401), which made CDN/browser cold-start issues
+// look identical to bad credentials — debugging nightmare.
+//
+// Detection rules (in priority order):
+//  1. err is nil → unexpected; caller should not invoke this helper.
+//  2. err originated from the LMS form submission (login page rendered the
+//     error indicator, or login did not redirect to /admin/) → credential
+//     failure (401). These errors come from Manager.login() and carry
+//     plain-text messages from the LMS, not wrapped Go errors.
+//  3. err originated from browser launch / page open / DNS / network /
+//     CDP → infrastructure failure (503).
+//  4. anything else → unknown infrastructure failure (503, conservative).
+func classifyLoginResult(npm string, err error) (*entity.LoginResult, int, error) {
+	if err == nil {
+		// Defensive: should not happen. Surface as 500 so we notice.
+		return &entity.LoginResult{
+			Success:   false,
+			Message:   "internal error: classifyLoginResult called with nil error",
+			NPM:       npm,
+			Timestamp: time.Now(),
+		}, fiber.StatusInternalServerError, fmt.Errorf("classifyLoginResult: nil error")
+	}
+
+	msg := err.Error()
+	kind := classifyLoginErrorKind(msg)
+
+	switch kind {
+	case loginErrorKindCredential:
+		// SECURITY: do not reveal which credential field was wrong.
+		// "Username atau password salah" means "either username or password
+		// (or both) is incorrect" — the user must verify both. This matches
+		// the security best practice of no user enumeration / no credential
+		// field disclosure.
+		return &entity.LoginResult{
+			Success:   false,
+			Message:   "Username atau password salah",
+			NPM:       npm,
+			Timestamp: time.Now(),
+		}, fiber.StatusUnauthorized, nil
+	case loginErrorKindInfrastructure:
+		slog.Warn("login infrastructure failure", "npm", npm, "category", kind, "cause", err)
+		return &entity.LoginResult{
+			Success:   false,
+			Message:   "Layanan LMS tidak dapat diakses saat ini. Silakan coba lagi dalam beberapa saat.",
+			NPM:       npm,
+			Timestamp: time.Now(),
+		}, fiber.StatusServiceUnavailable, nil
+	default:
+		// Unknown — treat as infrastructure failure to surface the real cause
+		// in logs without misleading the user with "wrong password".
+		slog.Warn("login unknown failure", "npm", npm, "category", kind, "cause", err)
+		return &entity.LoginResult{
+			Success:   false,
+			Message:   "Login gagal karena kesalahan sistem. Silakan coba lagi.",
+			NPM:       npm,
+			Timestamp: time.Now(),
+		}, fiber.StatusServiceUnavailable, nil
+	}
+}
+
+// loginErrorKind classifies the source of a login failure.
+type loginErrorKind int
+
+const (
+	loginErrorKindUnknown        loginErrorKind = iota
+	loginErrorKindCredential                    // LMS rejected the credentials
+	loginErrorKindInfrastructure                // browser / network / CDP / DNS
+)
+
+// loginErrorKeyword maps lowercase substrings to error categories.
+// Order: credential first (specific LMS messages), then infrastructure
+// patterns. "Unknown" is the fallback when no keyword matches.
+var loginErrorKeyword = []struct {
+	Substring string
+	Kind      loginErrorKind
+}{
+	// Credential failure indicators — these come from Manager.login()
+	// after the LMS rendered the error indicator or did not redirect
+	// to /admin/. The messages are user-facing text from the LMS itself
+	// (e.g. "LOGIN GAGAL! USERNAME DAN PASSWORD SALAH!") OR the
+	// redirect-check sentinel from session/manager.go:587.
+	//
+	// SECURITY: match ONLY combined phrases ("username dan password",
+	// "login gagal"), never "password salah" alone — the system must not
+	// expose which credential field is wrong (user enumeration risk).
+	// The public message stays generic: "Username atau password salah",
+	// meaning "keduanya salah" (either or both), even when only one is
+	// actually wrong. Server logs use the same generic phrasing.
+	{"username dan password", loginErrorKindCredential},
+	{"login gagal", loginErrorKindCredential},
+	{"page did not redirect to dashboard", loginErrorKindCredential},
+	{"login timed out: no response detected", loginErrorKindCredential},
+	{"session expired", loginErrorKindCredential},
+
+	// Infrastructure failure indicators — wrapped errors from
+	// session/manager.go (browser connect, page open, DNS) and
+	// browser/session.go (page ops).
+	{"DNS check", loginErrorKindInfrastructure},
+	{"cannot resolve LMS host", loginErrorKindInfrastructure},
+	{"browser connect", loginErrorKindInfrastructure},
+	{"launch browser", loginErrorKindInfrastructure},
+	{"connect browser", loginErrorKindInfrastructure},
+	{"open login page", loginErrorKindInfrastructure},
+	{"open page", loginErrorKindInfrastructure},
+	{"wait login page load", loginErrorKindInfrastructure},
+	{"create new page", loginErrorKindInfrastructure},
+	{"create profile dir", loginErrorKindInfrastructure},
+	{"navigate to dashboard", loginErrorKindInfrastructure},
+	{"wait dashboard load", loginErrorKindInfrastructure},
+	{"too many open pages", loginErrorKindInfrastructure},
+	{"context deadline exceeded", loginErrorKindInfrastructure},
+	{"timeout", loginErrorKindInfrastructure},
+	{"EOF", loginErrorKindInfrastructure},
+	{"connection refused", loginErrorKindInfrastructure},
+	{"no such host", loginErrorKindInfrastructure},
+	{"network is unreachable", loginErrorKindInfrastructure},
+}
+
+// classifyLoginErrorKind returns the most specific category for err's
+// message. Substrings are matched case-insensitively; first match wins.
+func classifyLoginErrorKind(msg string) loginErrorKind {
+	low := strings.ToLower(msg)
+	for _, kw := range loginErrorKeyword {
+		if strings.Contains(low, strings.ToLower(kw.Substring)) {
+			return kw.Kind
+		}
+	}
+	return loginErrorKindUnknown
 }
 
 // DownloadKRS downloads the KRS PDF for the given student.
