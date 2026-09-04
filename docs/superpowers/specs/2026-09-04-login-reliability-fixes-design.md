@@ -23,8 +23,9 @@ intermittent HTTP 503 responses during cold-start and high concurrent load:
    second, so a retry succeeds.
 
 The existing `Navigate()` method already implements this pattern (3
-retries with exponential backoff for transient errors). This design
-extends the same pattern to `Page()` and `checkDNS()`.
+retries with bounded backoff for transient errors). This design extends
+the same pattern to `Page()` (with backoff) and `checkDNS()` (without
+backoff — DNS cache warms within subsecond, no sleep needed).
 
 The previously-shipped login error classifier (commit history: `feat`
 branch `feat/cold-start-tier1-tier2-fixes`) correctly classifies these
@@ -73,9 +74,10 @@ func isTransientBrowserError(err error) bool {
         strings.Contains(msg, "timeout")
 }
 
-// Page opens a new browser tab. Retries 3x with exponential backoff on
-// transient CDP errors (EOF, deadline, timeout) — addresses the cold-start
-// race where Page() is called before the CDP websocket is fully ready.
+// Page opens a new browser tab. Retries 3x with bounded backoff
+// ([0, 500ms, 1s]) on transient CDP errors (EOF, deadline, timeout) —
+// addresses the cold-start race where Page() is called before the CDP
+// websocket is fully ready.
 //
 // On non-transient errors (context canceled, invalid args), returns
 // immediately — no retry, no backoff.
@@ -109,7 +111,8 @@ func (b *Browser) Page(url string) (*rod.Page, error) {
 }
 ```
 
-**New imports needed in `browser.go`**: `strings` (already imported).
+**New imports needed in `browser.go`**: `log/slog` (for retry logging).
+`strings` and `time` are already imported.
 
 ### 2. `Manager.checkDNS()` Retry (`internal/infrastructure/session/manager.go`)
 
@@ -181,8 +184,14 @@ func (m *Manager) checkDNS(rawURL string) error {
 }
 ```
 
-**No new imports needed in `manager.go`** (`strings`, `context`, `net`,
-`url`, `time`, `log/slog` already imported).
+**No new imports needed in `manager.go`** — `strings`, `context`,
+`net`, `url`, `time`, `log/slog` are already imported.
+
+**Backoff asymmetry note**: `Browser.Page()` uses bounded backoff
+(`[0, 500ms, 1s]`) because CDP cold-start race typically resolves
+within 1-2 seconds as the websocket buffer flushes. `checkDNS()` uses
+no backoff because the DNS cache warms within subsecond on retry;
+sleeping would only delay the user-visible failure with no benefit.
 
 ### 3. `DNSTimeout` Default Config (`internal/config/config.go`)
 
@@ -343,7 +352,12 @@ Existing behavior is restored.
 - `Config.AppConfig.DNSTimeout` type unchanged (`time.Duration`)
 - Existing `DNS_TIMEOUT` env var still respected (operators who set
   their own value won't be affected by the new 5s default)
-- All 14 existing callers of `Page()` automatically inherit retry benefit
+- The 14 existing callers of `Page()` inherit retry behavior:
+  - **Cold-start callers** (login flow in `manager.go`) — primary
+    beneficiaries; retry fixes intermittent EOF.
+  - **Mid-session callers** (`pdf_reader.go`, `cmd/extractor`,
+    `download.go`) — retry fires only on transient errors which are
+    rare; no behavior change for the happy path.
 - HTTP response shapes and status codes to clients are unchanged
   (classifier still maps to 503/401/200 correctly)
 
@@ -353,8 +367,13 @@ Existing behavior is restored.
   become silent). Mitigation: `slog.Warn` on every retry attempt with
   attempt number and error message.
 - **Low**: Retry adds latency worst-case (cold-start EOF + 3x retry +
-  backoff adds ~3.5s to login). Mitigation: exponential backoff caps
-  at 2s; first retry at 500ms catches the common case quickly.
+  backoff adds ~1.5s to login). Mitigation: bounded backoff caps at
+  1s; first retry at 500ms catches the common case quickly.
+- **Low**: Mid-session callers of `Page()` (e.g. `pdf_reader.go`,
+  `cmd/extractor/main.go`) inherit the retry but rarely need it.
+  Worst case: +1.5s to a successful page op that already takes seconds.
+  Mitigation: backoff is bounded, retry only fires on transient errors
+  which are rare mid-session.
 - **Negligible**: Existing tests don't cover retry path. Mitigation:
   new unit tests cover happy & failure paths.
 
