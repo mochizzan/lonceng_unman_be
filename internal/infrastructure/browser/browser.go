@@ -245,6 +245,9 @@ func cleanStaleLock(profileDir string) {
 // On non-transient errors (context canceled, invalid args), returns
 // immediately — no retry, no backoff.
 func (b *Browser) Page(url string) (*rod.Page, error) {
+	if b == nil || b.rod == nil {
+		return nil, fmt.Errorf("open page %s after 1 attempts: browser not connected (nil rod)", url)
+	}
 	const maxAttempts = 3
 	backoffs := []time.Duration{0, 1 * time.Second, 2 * time.Second}
 

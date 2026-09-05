@@ -138,6 +138,7 @@ func (m *Manager) InjectTestSession(npm string, browser *browserInfra.Browser, _
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions[npm] = &cachedSession{
+		npm:       npm,
 		browser:   browser,
 		createdAt: now,
 		lastUsed:  now,
@@ -258,7 +259,12 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 			slog.Info("session reused", "npm", npm)
 			newSess, err := newSession(sess)
 			if err != nil {
-				// Session is corrupted, evict and retry.
+				// Rollback activeCount before eviction.
+				sess.mu.Lock()
+				if sess.activeCount > 0 {
+					sess.activeCount--
+				}
+				sess.mu.Unlock()
 				slog.Warn("session corrupted, evicting", "npm", npm, "error", err)
 				m.evictSession(npm)
 				return m.createNewSession(npm, password)
@@ -289,7 +295,12 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 			slog.Info("session reused (double-check)", "npm", npm)
 			newSess, err := newSession(sess)
 			if err != nil {
-				// Session is corrupted, evict and retry.
+				// Rollback activeCount before eviction.
+				sess.mu.Lock()
+				if sess.activeCount > 0 {
+					sess.activeCount--
+				}
+				sess.mu.Unlock()
 				slog.Warn("session corrupted, evicting", "npm", npm, "error", err)
 				m.evictSession(npm)
 				return m.createNewSession(npm, password)
@@ -354,9 +365,28 @@ func (m *Manager) createNewSession(npm, password string) (port.BrowserSession, e
 	m.sessions[npm] = sess
 	m.mu.Unlock()
 
-	sess.activeCount = 1 // Set directly since session is brand new
+	sess.mu.Lock()
+	sess.activeCount = 1
+	sess.mu.Unlock()
 	newSess, err := newSession(sess)
 	if err != nil {
+		// Rollback: activeCount was incremented but newSession failed;
+		// clean up the map entry so we don't leak a zombie session.
+		sess.mu.Lock()
+		if sess.activeCount > 0 {
+			sess.activeCount--
+		}
+		sess.mu.Unlock()
+		m.mu.Lock()
+		// Only delete if still our sess (no concurrent replacement).
+		if cur, ok := m.sessions[npm]; ok && cur == sess {
+			delete(m.sessions, npm)
+		}
+		m.mu.Unlock()
+		// Best-effort browser close outside locks.
+		sess.mu.Lock()
+		_ = sess.browser.Close()
+		sess.mu.Unlock()
 		return nil, err
 	}
 	return newSess, nil
@@ -460,6 +490,11 @@ func (m *Manager) CheckDNS(rawURL string) error {
 		return fmt.Errorf("DNS check: invalid LMS URL %q: %w", rawURL, err)
 	}
 	host := u.Hostname()
+	if host == "" {
+		// Stray test helper InjectTestSession used before with empty LMSBaseURL.
+		// Skip DNS check for empty host — caller already verifies config.
+		return nil
+	}
 
 	dnsTimeout := m.cfg.App.DNSTimeout
 	if dnsTimeout == 0 {

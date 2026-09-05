@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"lonceng_unman_be/internal/apperror"
@@ -61,6 +63,12 @@ type LMSDocumentService interface {
 type lmsDocumentService struct {
 	cfg      *config.Config
 	sessions port.SessionManager
+	npmLocks sync.Map // map[string]*sync.Mutex, per-NPM phase-limited lock (distinct from Manager.npmLocks)
+}
+
+func (s *lmsDocumentService) getNPMLock(npm string) *sync.Mutex {
+	v, _ := s.npmLocks.LoadOrStore(npm, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // NewLMSDocumentService creates an LMSDocumentService with session management.
@@ -231,7 +239,13 @@ func classifyLoginErrorKind(msg string) loginErrorKind {
 
 // DownloadKRS downloads the KRS PDF for the given student.
 // Flow: get session → navigate to KRS page → extract semester → download PDF.
+// The browser phase is serialized per-NPM so concurrent downloads for the same
+// NPM do not race on the shared Chrome --user-data-dir.
 func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity.KRSDownloadResult, error) {
+	mu := s.getNPMLock(req.NPM)
+	mu.Lock()
+	defer mu.Unlock()
+
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
@@ -253,8 +267,10 @@ func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity
 	}
 	slog.Info("KRS semester extracted", "npm", req.NPM, "semester", semesterNum)
 
-	// Download KRS PDF.
-	krsURL := s.cfg.App.LMSBaseURL + port.KRSDownloadPath + "?nis=" + req.NPM
+	// Download KRS PDF — encode NPM as query param.
+	q := url.Values{}
+	q.Set("nis", strings.TrimSpace(req.NPM))
+	krsURL := s.cfg.App.LMSBaseURL + port.KRSDownloadPath + "?" + q.Encode()
 	slog.Info("downloading KRS", "url", krsURL)
 
 	savePath := filepath.Join(s.cfg.App.DownloadDir, req.NPM, "krs", fmt.Sprintf("semester_%s.pdf", semesterNum))
@@ -277,7 +293,12 @@ func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity
 }
 
 // GetKHSSemesters returns the list of available KHS semesters.
+// The browser phase is serialized per-NPM; KHSListPath is static so no QueryEscape needed.
 func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*entity.KHSSemestersResult, error) {
+	mu := s.getNPMLock(req.NPM)
+	mu.Lock()
+	defer mu.Unlock()
+
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
@@ -340,12 +361,21 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 }
 
 // DownloadKHS downloads the KHS PDF for a specific semester.
+// Validation is done before acquiring the per-NPM lock to avoid holding the lock for bad input.
 func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity.KHSDownloadResult, error) {
-	// Validate semester format.
-	req.Semester = strings.ToUpper(req.Semester)
+	// Normalize and validate before locking.
+	req.Semester = strings.ToUpper(strings.TrimSpace(req.Semester))
+	req.TahunAjaran = strings.TrimSpace(req.TahunAjaran)
 	if !entity.ValidSemester(req.Semester) {
 		return nil, fmt.Errorf("semester must be GANJIL or GENAP")
 	}
+	if req.TahunAjaran == "" {
+		return nil, apperror.BadRequest("tahun_ajaran is required")
+	}
+
+	mu := s.getNPMLock(req.NPM)
+	mu.Lock()
+	defer mu.Unlock()
 
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
@@ -353,9 +383,11 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 	}
 	defer session.Close()
 
-	// Navigate to KHS detail page.
-	detailURL := fmt.Sprintf("%s%s&tahun_ajaran=%s&semester=%s",
-		s.cfg.App.LMSBaseURL, port.KHSDetailPath, req.TahunAjaran, req.Semester)
+	// Build detail URL with proper QueryEscape (slash in tahunAjaran → %2F).
+	q := url.Values{}
+	q.Set("tahun_ajaran", req.TahunAjaran)
+	q.Set("semester", req.Semester)
+	detailURL := s.cfg.App.LMSBaseURL + port.KHSDetailPath + "&" + q.Encode()
 	slog.Info("navigating to KHS detail", "url", detailURL)
 
 	if err := session.Navigate(detailURL); err != nil {
@@ -394,10 +426,15 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 }
 
 // DownloadKHSFile serves an already-downloaded KHS PDF file as binary data.
+// Local filesystem only — no browser lock needed.
 func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (string, int64, error) {
-	req.Semester = strings.ToUpper(req.Semester)
+	req.Semester = strings.ToUpper(strings.TrimSpace(req.Semester))
+	req.TahunAjaran = strings.TrimSpace(req.TahunAjaran)
 	if !entity.ValidSemester(req.Semester) {
 		return "", 0, apperror.BadRequest("semester must be GANJIL or GENAP")
+	}
+	if req.TahunAjaran == "" {
+		return "", 0, apperror.BadRequest("tahun_ajaran is required")
 	}
 
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)

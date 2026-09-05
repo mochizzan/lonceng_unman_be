@@ -56,7 +56,7 @@ func (h *DocumentHandler) DownloadKRS(c fiber.Ctx) error {
 
 	result, err := h.docService.DownloadKRS(req)
 	if err != nil {
-		return apperror.Internal("KRS download failed", err)
+		return apperror.ClassifyDocumentError(err, "KRS download failed")
 	}
 
 	return response.Success(c, fiber.StatusOK, result, result.Message)
@@ -78,7 +78,7 @@ func (h *DocumentHandler) GetKHSSemesters(c fiber.Ctx) error {
 
 	result, err := h.docService.GetKHSSemesters(req)
 	if err != nil {
-		return apperror.Internal("fetch KHS semesters failed", err)
+		return apperror.ClassifyDocumentError(err, "fetch KHS semesters failed")
 	}
 
 	return response.Success(c, fiber.StatusOK, result, result.Message)
@@ -106,7 +106,7 @@ func (h *DocumentHandler) DownloadKHS(c fiber.Ctx) error {
 
 	result, err := h.docService.DownloadKHS(req)
 	if err != nil {
-		return apperror.Internal("KHS download failed", err)
+		return apperror.ClassifyDocumentError(err, "KHS download failed")
 	}
 
 	return response.Success(c, fiber.StatusOK, result, result.Message)

@@ -66,9 +66,12 @@ func newSession(cachedSess *cachedSession) (*rodSession, error) {
 }
 
 // touchLastUsed updates the lastUsed timestamp of the cached session.
-// Must be called while s.mu is held.
+// Guards cachedSess.mu directly so it is safe to call while s.mu is held
+// or without holding s.mu. Callers do not need to hold s.mu for this call.
 func (s *rodSession) touchLastUsed() {
+	s.cachedSess.mu.Lock()
 	s.cachedSess.lastUsed = time.Now()
+	s.cachedSess.mu.Unlock()
 }
 
 // Navigate loads the given URL and waits for the page to be ready.
@@ -150,11 +153,11 @@ func (s *rodSession) ElementAttribute(selector, attr string) (string, error) {
 	page := s.page.Timeout(pageTimeout)
 	el, err := page.Element(selector)
 	if err != nil {
-		return "", fmt.Errorf("find element %s: %w", err)
+		return "", fmt.Errorf("find element %s: %w", selector, err)
 	}
 	val, err := el.Attribute(attr)
 	if err != nil {
-		return "", fmt.Errorf("get attribute %s: %w", err)
+		return "", fmt.Errorf("get attribute %s: %w", attr, err)
 	}
 	if val == nil {
 		return "", fmt.Errorf("attribute %s is nil on %s", attr, selector)
@@ -234,14 +237,18 @@ func (s *rodSession) Close() error {
 		}
 		// Decrement page count.
 		s.cachedSess.pageMu.Lock()
-		s.cachedSess.pageCount--
+		if s.cachedSess.pageCount > 0 {
+			s.cachedSess.pageCount--
+		}
 		fmt.Printf("[SESSION] Page closed, pageCount=%d\n", s.cachedSess.pageCount)
 		s.cachedSess.pageMu.Unlock()
 	}
 
+	s.cachedSess.mu.Lock()
 	if s.cachedSess.activeCount > 0 {
 		s.cachedSess.activeCount--
 	}
+	s.cachedSess.mu.Unlock()
 	return nil
 }
 

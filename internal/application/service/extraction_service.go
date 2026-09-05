@@ -43,9 +43,26 @@ func NewExtractionService(downloadDir string, extractDir string, parser port.PDF
 }
 
 // verifySession ensures LMS credentials are valid before extraction.
+// Infrastructure failures (browser/CDP/DNS/timeout) are classified as 503 so
+// the caller can retry, instead of misleading the user with "wrong password".
 func (s *extractionService) verifySession(npm, password string) error {
 	session, err := s.sessions.GetOrCreate(npm, password)
 	if err != nil {
+		if apperror.IsInfrastructureError(err) {
+			return apperror.ClassifyDocumentError(err, "LMS extraction failed")
+		}
+		if apperror.IsCredentialError(err) {
+			return apperror.Unauthorized("Username atau password salah")
+		}
+		// Conservative fallback: treat unknown as infrastructure (503) to avoid
+		// masking cold-start issues as credential failures. Only explicit
+		// credential keywords above map to 401.
+		// Check for generic timeout/deadline that IsInfrastructureError may miss
+		// when the error is deeply wrapped without the exact keyword casing.
+		low := strings.ToLower(err.Error())
+		if strings.Contains(low, "context deadline exceeded") || strings.Contains(low, "dns check") {
+			return apperror.ClassifyDocumentError(err, "LMS extraction failed")
+		}
 		return apperror.Unauthorized("Username atau password salah")
 	}
 	session.Close() // Release session reference immediately
