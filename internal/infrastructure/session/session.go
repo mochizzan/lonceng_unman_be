@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -47,12 +48,16 @@ func newSession(cachedSess *cachedSession) (*rodSession, error) {
 		return nil, fmt.Errorf("browser has too many open pages (%d >= %d) — session corrupted, please retry", cachedSess.pageCount, maxPagesPerBrowser)
 	}
 
-	fmt.Printf("[SESSION] Creating new page for npm=%s (pageCount=%d)\n", cachedSess.npm, cachedSess.pageCount)
+	slog.Debug("[DIAG-PAGE] creating new page", "npm", cachedSess.npm, "pageCount", cachedSess.pageCount)
 	page, err := cachedSess.browser.Page("about:blank")
 	if err == nil {
 		cachedSess.pageCount++
 	}
-	fmt.Printf("[SESSION] Page created: err=%v, pageCount=%d\n", err, cachedSess.pageCount)
+	if err != nil {
+		slog.Warn("Page() failed", "npm", cachedSess.npm, "pageCount", cachedSess.pageCount, "error", err)
+	} else {
+		slog.Debug("[DIAG-PAGE] page created", "npm", cachedSess.npm, "pageCount", cachedSess.pageCount)
+	}
 	cachedSess.pageMu.Unlock()
 
 	if err != nil {
@@ -63,6 +68,60 @@ func newSession(cachedSess *cachedSession) (*rodSession, error) {
 		page:       page,
 		cachedSess: cachedSess,
 	}, nil
+}
+
+// isTimeout reports whether err is a timeout/deadline failure worth retrying
+// with a fresh page. Used to distinguish H1 (CDP target hang) from non-timeout errors.
+func isTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "timeout")
+}
+
+// replacePage closes the current stale page and creates a fresh one from the
+// shared browser. It is called while s.mu is held; it acquires pageMu internally.
+// On timeout-induced Navigate failures (H1), the old CDP target is dead and
+// reusing it guarantees subsequent attempts also fail. Replacing the page
+// breaks the corruption chain without evicting the entire browser session.
+func (s *rodSession) replacePage() error {
+	oldPage := s.page
+	if oldPage != nil {
+		done := make(chan error, 1)
+		go func() { done <- oldPage.Close() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				slog.Warn("[DIAG-PAGE] replacePage close old failed", "npm", s.cachedSess.npm, "error", err)
+			} else {
+				slog.Debug("[DIAG-PAGE] replacePage close old ok", "npm", s.cachedSess.npm)
+			}
+		case <-time.After(5 * time.Second):
+			slog.Warn("[DIAG-PAGE] replacePage close old timed out", "npm", s.cachedSess.npm, "timeout", 5*time.Second)
+		}
+		s.cachedSess.pageMu.Lock()
+		if s.cachedSess.pageCount > 0 {
+			s.cachedSess.pageCount--
+		}
+		slog.Debug("[DIAG-PAGE] replacePage decremented", "npm", s.cachedSess.npm, "pageCount", s.cachedSess.pageCount)
+		s.cachedSess.pageMu.Unlock()
+	}
+	s.cachedSess.pageMu.Lock()
+	defer s.cachedSess.pageMu.Unlock()
+	if s.cachedSess.pageCount >= maxPagesPerBrowser {
+		return fmt.Errorf("browser has too many open pages (%d >= %d) — session corrupted, please retry", s.cachedSess.pageCount, maxPagesPerBrowser)
+	}
+	slog.Debug("[DIAG-PAGE] replacePage creating new page", "npm", s.cachedSess.npm, "pageCount", s.cachedSess.pageCount)
+	page, err := s.cachedSess.browser.Page("about:blank")
+	if err != nil {
+		slog.Warn("[DIAG-PAGE] replacePage create failed", "npm", s.cachedSess.npm, "error", err)
+		return fmt.Errorf("replace page: %w", err)
+	}
+	s.cachedSess.pageCount++
+	slog.Info("[DIAG-PAGE] replacePage success", "npm", s.cachedSess.npm, "pageCount", s.cachedSess.pageCount)
+	s.page = page
+	return nil
 }
 
 // touchLastUsed updates the lastUsed timestamp of the cached session.
@@ -77,6 +136,11 @@ func (s *rodSession) touchLastUsed() {
 // Navigate loads the given URL and waits for the page to be ready.
 // It retries on timeout errors and resets page state via about:blank
 // to avoid the "stale page" issue where subsequent navigations fail.
+//
+// [DIAG-NAV] instrumentation: every phase (reset, navigate, waitLoad)
+// logs with elapsed latency so H1 (CDP target hang, stale page reuse),
+// H2 (per-call timeout vs global deadline), and H4 (LMS throttle → WaitLoad
+// hang) can be distinguished. Tagged [DIAG-NAV] for single-grep cleanup.
 func (s *rodSession) Navigate(url string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -86,10 +150,14 @@ func (s *rodSession) Navigate(url string) error {
 	// Reset page state by navigating to about:blank first.
 	// This prevents the "context deadline exceeded" error that occurs
 	// when a page is reused after the previous page was closed.
+	navStart := time.Now()
+	slog.Debug("[DIAG-NAV] reset start", "npm", s.cachedSess.npm, "url", url)
 	page := s.page.Timeout(pageTimeout)
 	if err := page.Navigate("about:blank"); err != nil {
+		slog.Warn("[DIAG-NAV] reset failed", "npm", s.cachedSess.npm, "url", url, "elapsed", time.Since(navStart), "error", err)
 		return fmt.Errorf("reset page state: %w", err)
 	}
+	slog.Debug("[DIAG-NAV] reset ok", "npm", s.cachedSess.npm, "elapsed", time.Since(navStart))
 
 	// Retry navigation up to 3 times on timeout errors.
 	// The LMS server can be slow to respond, especially on subsequent
@@ -98,33 +166,52 @@ func (s *rodSession) Navigate(url string) error {
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
 			// Wait before retry to let the server recover.
+			slog.Debug("[DIAG-NAV] retry backoff", "npm", s.cachedSess.npm, "attempt", attempt+1, "sleep", time.Duration(attempt)*time.Second)
 			time.Sleep(time.Duration(attempt) * time.Second)
-			// Reset page state again before retry.
-			_ = s.page.Timeout(pageTimeout).Navigate("about:blank")
+			// H1 fix: on timeout, the old CDP target is dead — replace the page
+			// instead of reusing it. Without this, retry attempt 2/3 re-enters
+			// the same hung target and also hits context deadline exceeded.
+			if isTimeout(lastErr) {
+				slog.Info("[DIAG-NAV] timeout on prior attempt, replacing page", "npm", s.cachedSess.npm, "attempt", attempt+1)
+				if err := s.replacePage(); err != nil {
+					return fmt.Errorf("replace page before retry: %w", err)
+				}
+			} else {
+				// Non-timeout retry (should not happen — we return early below —
+				// but keep a reset for completeness).
+				_ = s.page.Timeout(pageTimeout).Navigate("about:blank")
+			}
 		}
 
+		slog.Debug("[DIAG-NAV] navigate attempt start", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1)
+		attemptStart := time.Now()
 		page := s.page.Timeout(pageTimeout)
 		if err := page.Navigate(url); err != nil {
+			elapsed := time.Since(attemptStart)
 			lastErr = fmt.Errorf("navigate to %s (attempt %d): %w", url, attempt+1, err)
-			// Check if this is a timeout error that we should retry.
-			if strings.Contains(err.Error(), "context deadline exceeded") ||
-				strings.Contains(err.Error(), "timeout") {
+			slog.Warn("[DIAG-NAV] navigate failed", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "elapsed", elapsed, "error", err)
+			if isTimeout(err) {
 				continue
 			}
 			// Non-timeout error, don't retry.
 			return lastErr
 		}
+		slog.Debug("[DIAG-NAV] navigate ok, waiting load", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "elapsed", time.Since(attemptStart))
+		waitStart := time.Now()
 		if err := page.WaitLoad(); err != nil {
+			elapsed := time.Since(waitStart)
 			lastErr = fmt.Errorf("wait load %s (attempt %d): %w", url, attempt+1, err)
-			if strings.Contains(err.Error(), "context deadline exceeded") ||
-				strings.Contains(err.Error(), "timeout") {
+			slog.Warn("[DIAG-NAV] waitLoad failed", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "elapsed", elapsed, "error", err)
+			if isTimeout(err) {
 				continue
 			}
 			return lastErr
 		}
+		slog.Info("[DIAG-NAV] navigate success", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "total_elapsed", time.Since(navStart))
 		// Success.
 		return nil
 	}
+	slog.Warn("[DIAG-NAV] navigate exhausted", "npm", s.cachedSess.npm, "url", url, "total_elapsed", time.Since(navStart), "lastErr", lastErr)
 	return fmt.Errorf("navigate to %s failed after 3 attempts: %w", url, lastErr)
 }
 
@@ -230,17 +317,19 @@ func (s *rodSession) Close() error {
 		select {
 		case err := <-done:
 			if err != nil {
-				fmt.Printf("[SESSION] Page close error: %v\n", err)
+				slog.Warn("Page close error", "npm", s.cachedSess.npm, "pageCount", s.cachedSess.pageCount, "error", err)
+			} else {
+				slog.Debug("[DIAG-PAGE] page close ok", "npm", s.cachedSess.npm, "pageCount", s.cachedSess.pageCount)
 			}
 		case <-time.After(pageTimeout):
-			fmt.Printf("[SESSION] Page close timed out after %v\n", pageTimeout)
+			slog.Warn("Page close timed out", "npm", s.cachedSess.npm, "pageCount", s.cachedSess.pageCount, "timeout", pageTimeout)
 		}
 		// Decrement page count.
 		s.cachedSess.pageMu.Lock()
 		if s.cachedSess.pageCount > 0 {
 			s.cachedSess.pageCount--
 		}
-		fmt.Printf("[SESSION] Page closed, pageCount=%d\n", s.cachedSess.pageCount)
+		slog.Debug("[DIAG-PAGE] page closed", "npm", s.cachedSess.npm, "pageCount", s.cachedSess.pageCount)
 		s.cachedSess.pageMu.Unlock()
 	}
 

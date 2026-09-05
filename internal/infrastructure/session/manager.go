@@ -227,6 +227,7 @@ func (m *Manager) createSessionWithRestore(npm, password string, profileDir stri
 	slog.Info("restored session validated successfully", "npm", npm)
 	now := time.Now()
 	return &cachedSession{
+		npm:       npm,
 		browser:   br,
 		createdAt: now,
 		lastUsed:  now,
@@ -265,7 +266,16 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 					sess.activeCount--
 				}
 				sess.mu.Unlock()
-				slog.Warn("session corrupted, evicting", "npm", npm, "error", err)
+				// H1-aware: Page() hang with "context deadline exceeded" means
+				// the browser's CDP target is wedged — the session's pages are
+				// all suspect. Evict at once so the next retry gets a fresh
+				// browser instead of looping on the same dead target.
+				if strings.Contains(strings.ToLower(err.Error()), "context deadline exceeded") ||
+					strings.Contains(strings.ToLower(err.Error()), "deadline") {
+					slog.Warn("session corrupted (CDP hang), evicting", "npm", npm, "error", err)
+				} else {
+					slog.Warn("session corrupted, evicting", "npm", npm, "error", err)
+				}
 				m.evictSession(npm)
 				return m.createNewSession(npm, password)
 			}
@@ -301,7 +311,12 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 					sess.activeCount--
 				}
 				sess.mu.Unlock()
-				slog.Warn("session corrupted, evicting", "npm", npm, "error", err)
+				if strings.Contains(strings.ToLower(err.Error()), "context deadline exceeded") ||
+					strings.Contains(strings.ToLower(err.Error()), "deadline") {
+					slog.Warn("session corrupted (CDP hang), evicting", "npm", npm, "error", err)
+				} else {
+					slog.Warn("session corrupted, evicting", "npm", npm, "error", err)
+				}
 				m.evictSession(npm)
 				return m.createNewSession(npm, password)
 			}
