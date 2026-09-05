@@ -70,7 +70,7 @@ POST /api/v1/lms/khs/file {npm, password, tahun_ajaran, semester}
   → handler: c.SendFile with PDF headers, or classified error
 ```
 
-Reuse surface from `DownloadKHS` (`lms_service.go:363`): `url.Values.Encode` for `tahun_ajaran` slash handling, `SelKHSCetakBtn`, `DownloadPDF`, per-NPM lock via `getNPMLock`, overwrite semantics. No new dependency.
+Reuse surface from `DownloadKHS` (`lms_service.go:363`): `url.Values.Encode` for `tahun_ajaran` slash handling, `port.SelKHSCetakBtn` / `port.KHSDetailPath`, `DownloadPDF`, per-NPM lock via `getNPMLock`, overwrite semantics. No new dependency. (`port` = `internal/domain/port`; constants verified in `lms_config.go`.)
 
 ## 4. Files & Blast Radius
 
@@ -163,10 +163,12 @@ func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (str
     mu.Lock()
     defer mu.Unlock()
 
-    // Re-check after acquiring lock (another goroutine may have downloaded).
+    // Re-check after acquiring lock (another goroutine may have downloaded while we waited).
     if info, err := os.Stat(filePath); err == nil {
-        slog.Info("serving KHS file (cache hit after lock)", "npm", req.NPM, "path", filePath)
+        slog.Info("serving KHS file (cache hit after lock)", "npm", req.NPM, "path", filePath, "size", info.Size())
         return filePath, info.Size(), nil
+    } else if !os.IsNotExist(err) {
+        return "", 0, apperror.Internal("failed to stat PDF file", err)
     }
 
     session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
@@ -221,8 +223,7 @@ Notes:
 No behavioral change beyond error propagation. Current handler already:
 - Validates `npm`, `password`, `tahun_ajaran`, `semester`.
 - Calls `docService.DownloadKHSFile` and on error `return err` (Fiber error handler maps `*AppError` to JSON; wrapped `infra` errors become 500 unless classified).
-- Should ensure fallback errors get `ClassifyDocumentError` mapping to 401/503. Options:
-  - (Chosen) Keep handler as `return err` and let service-level wrapped errors be classified by the global `fibererror` / `ClassifyDocumentError` call if the handler adds `return apperror.ClassifyDocumentError(err, "KHS download failed")` on non-AppError. Check current `document_handler.go:134` — it does `return err` raw; the other handlers (`DownloadKHS`, `GetKHSSemesters`) do `return apperror.ClassifyDocumentError(err, ...)`. Align `DownloadKHSFile` fallback path with that pattern: if the cache-hit path already handles `*AppError`, the fallback error path should be `return apperror.ClassifyDocumentError(err, "KHS download failed")` so infra→503 and credential→401 are surfaced correctly. This is a one-line handler fix.
+- Must ensure fallback errors get `ClassifyDocumentError` mapping to 401/503. Current `document_handler.go:134` does `return err` raw; the other doc handlers (`DownloadKHS`, `GetKHSSemesters`, `DownloadKRS`) do `return apperror.ClassifyDocumentError(err, ...)`. **Required one-line handler fix:** change `DownloadKHSFile`'s error return to `return apperror.ClassifyDocumentError(err, "KHS download failed")` so `infraKeywords`→503 and `credentialKeywords`→401 are surfaced (this also preserves pass-through for `*AppError` 400/404 via the `errors.As` guard in `ClassifyDocumentError`).
 
 Success path unchanged:
 ```go

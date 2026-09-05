@@ -425,8 +425,16 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 	}, nil
 }
 
-// DownloadKHSFile serves an already-downloaded KHS PDF file as binary data.
-// Local filesystem only — no browser lock needed.
+// DownloadKHSFile serves a KHS PDF file as binary data with local-first + inline fallback.
+//
+// Fast path: if the PDF already exists on disk, it is served without touching
+// the LMS (no GetOrCreate, no browser, no lock).
+//
+// Fallback (cache miss): acquires the per-NPM lock, re-checks the filesystem
+// (another goroutine may have downloaded while we waited), then performs the
+// same download flow as DownloadKHS (GetOrCreate → Navigate detail →
+// ElementHref(SelKHSCetakBtn) → DownloadPDF) and serves the freshly
+// downloaded file.
 func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (string, int64, error) {
 	req.Semester = strings.ToUpper(strings.TrimSpace(req.Semester))
 	req.TahunAjaran = strings.TrimSpace(req.TahunAjaran)
@@ -437,14 +445,59 @@ func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (str
 		return "", 0, apperror.BadRequest("tahun_ajaran is required")
 	}
 
+	filePath := filepath.Join(s.cfg.App.DownloadDir, req.NPM, "khs",
+		entity.KHSFilename(req.TahunAjaran, req.Semester))
+
+	// Fast path: serve if already on disk — no LMS, no lock.
+	if info, err := os.Stat(filePath); err == nil {
+		slog.Info("serving KHS file (cache hit)", "npm", req.NPM, "path", filePath, "size", info.Size())
+		return filePath, info.Size(), nil
+	} else if !os.IsNotExist(err) {
+		return "", 0, apperror.Internal("failed to stat PDF file", err)
+	}
+
+	// Cache miss: fallback download — same steps as DownloadKHS, under per-NPM lock.
+	mu := s.getNPMLock(req.NPM)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Re-check after acquiring lock (another goroutine may have downloaded while we waited).
+	if info, err := os.Stat(filePath); err == nil {
+		slog.Info("serving KHS file (cache hit after lock)", "npm", req.NPM, "path", filePath, "size", info.Size())
+		return filePath, info.Size(), nil
+	} else if !os.IsNotExist(err) {
+		return "", 0, apperror.Internal("failed to stat PDF file", err)
+	}
+
 	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
 		return "", 0, fmt.Errorf("get session: %w", err)
 	}
 	defer session.Close()
 
-	filePath := filepath.Join(s.cfg.App.DownloadDir, req.NPM, "khs",
-		entity.KHSFilename(req.TahunAjaran, req.Semester))
+	q := url.Values{}
+	q.Set("tahun_ajaran", req.TahunAjaran)
+	q.Set("semester", req.Semester)
+	detailURL := s.cfg.App.LMSBaseURL + port.KHSDetailPath + "&" + q.Encode()
+	slog.Info("navigating to KHS detail (fallback)", "url", detailURL)
+
+	if err := session.Navigate(detailURL); err != nil {
+		return "", 0, fmt.Errorf("navigate to KHS detail: %w", err)
+	}
+
+	href, err := session.ElementHref(port.SelKHSCetakBtn)
+	if err != nil {
+		return "", 0, fmt.Errorf("find CETAK KHS button: %w", err)
+	}
+
+	pdfURL := s.cfg.App.LMSBaseURL + "/admin/" + href
+	slog.Info("downloading KHS PDF (fallback)", "url", pdfURL)
+
+	filename, size, err := session.DownloadPDF(pdfURL, filePath)
+	_ = filename
+	if err != nil {
+		return "", 0, fmt.Errorf("download KHS PDF: %w", err)
+	}
 
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -453,7 +506,7 @@ func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (str
 		}
 		return "", 0, apperror.Internal("failed to stat PDF file", err)
 	}
-
-	slog.Info("serving KHS file", "npm", req.NPM, "path", filePath, "size", info.Size())
+	_ = size
+	slog.Info("serving KHS file (fallback complete)", "npm", req.NPM, "path", filePath, "size", info.Size())
 	return filePath, info.Size(), nil
 }

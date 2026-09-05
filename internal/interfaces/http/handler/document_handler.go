@@ -133,7 +133,7 @@ func (h *DocumentHandler) DownloadKHSFile(c fiber.Ctx) error {
 
 	filePath, size, err := h.docService.DownloadKHSFile(req)
 	if err != nil {
-		return err
+		return apperror.ClassifyDocumentError(err, "KHS download failed")
 	}
 
 	c.Set("Content-Type", "application/pdf")
