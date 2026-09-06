@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type PhotoCacheMeta struct {
 type PhotoCache struct {
 	baseDir string
 	ttl     time.Duration
+	mu      sync.RWMutex // guards Get/Set/Invalidate + orphan delete
 }
 
 // New creates a PhotoCache with the given base directory and TTL.
@@ -33,34 +35,45 @@ func (c *PhotoCache) Get(npm string) (string, error) {
 	metaPath := c.metaPath(npm)
 	photoPath := c.photoPath(npm)
 
+	c.mu.RLock()
 	data, err := os.ReadFile(metaPath)
 	if os.IsNotExist(err) {
+		c.mu.RUnlock()
 		return "", nil // cache miss
 	}
 	if err != nil {
+		c.mu.RUnlock()
 		return "", fmt.Errorf("read cache meta: %w", err)
 	}
 
 	var meta PhotoCacheMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
+		c.mu.RUnlock()
 		return "", fmt.Errorf("unmarshal cache meta: %w", err)
 	}
 
 	if time.Now().After(meta.ExpiresAt) {
+		c.mu.RUnlock()
 		return "", nil // expired
 	}
 
-	// Verify photo file exists; if missing, delete orphan metadata and return miss
 	if _, err := os.Stat(photoPath); err != nil {
 		if os.IsNotExist(err) {
-			// Photo file is missing but metadata exists — orphan metadata.
-			// Delete it and report cache miss.
-			_ = os.Remove(metaPath)
+			// Orphan metadata — need write lock to delete.
+			c.mu.RUnlock()
+			c.mu.Lock()
+			// Re-check under write lock to avoid deleting if raced Set succeeded.
+			if _, err := os.Stat(photoPath); os.IsNotExist(err) {
+				_ = os.Remove(metaPath)
+			}
+			c.mu.Unlock()
 			return "", nil
 		}
+		c.mu.RUnlock()
 		return "", fmt.Errorf("stat photo file: %w", err)
 	}
 
+	c.mu.RUnlock()
 	return photoPath, nil
 }
 
@@ -68,6 +81,9 @@ func (c *PhotoCache) Get(npm string) (string, error) {
 // Both files are written via tmp+rename so a crash mid-write cannot leave
 // a partial file. Photo is written first, then metadata.
 func (c *PhotoCache) Set(npm string, photoData []byte, originalFilename string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if err := os.MkdirAll(c.photoDir(npm), 0o755); err != nil {
 		return fmt.Errorf("create photo dir: %w", err)
 	}
@@ -131,6 +147,9 @@ func writeAtomic(path string, data []byte, perm os.FileMode) error {
 // Invalidate removes both the metadata and photo files for a given NPM.
 // It is idempotent: missing files are ignored.
 func (c *PhotoCache) Invalidate(npm string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	var firstErr error
 	for _, path := range []string{c.metaPath(npm), c.photoPath(npm)} {
 		err := os.Remove(path)

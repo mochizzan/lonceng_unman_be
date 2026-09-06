@@ -326,13 +326,20 @@ func (m *Manager) GetOrCreate(npm, password string) (port.BrowserSession, error)
 	}
 
 	// Evict expired session for this NPM if it exists in map.
+	// Lock ordering: m.mu before sess.mu; never hold sess.mu while acquiring m.mu.
 	if ok {
-		sess.mu.Lock()
-		_ = sess.browser.Close()
-		sess.mu.Unlock()
+		var toClose *browserInfra.Browser
 		m.mu.Lock()
-		delete(m.sessions, npm)
+		if cur, ok := m.sessions[npm]; ok && cur == sess {
+			toClose = cur.browser
+			delete(m.sessions, npm)
+		}
 		m.mu.Unlock()
+		if toClose != nil {
+			sess.mu.Lock()
+			_ = toClose.Close()
+			sess.mu.Unlock()
+		}
 	}
 
 	return m.createNewSession(npm, password)
@@ -736,6 +743,7 @@ func (m *Manager) cleanupLoop() {
 
 // cleanup removes all sessions that have exceeded the TTL.
 // Sessions with active users (activeCount > 0) are skipped unless hard limit hit.
+// Lock ordering: m.mu before sess.mu; never hold sess.mu while acquiring m.mu.
 func (m *Manager) cleanup() {
 	m.mu.Lock()
 	now := time.Now()

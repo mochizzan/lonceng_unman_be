@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -123,6 +124,7 @@ func New() (*Config, error) {
 			PhotoRetryWait: getEnvDuration("PHOTO_RETRY_WAIT", 1*time.Second),
 			// SCRAPE_FORM_WAIT replaces a hardcoded 3s wait after the form is
 			// detected; 2s is enough for the 55+ fields to populate.
+			// scraper enforces [2s,30s] (see browser/scraper.go probeTimeout clamp).
 			ScrapeFormWait: getEnvDuration("SCRAPE_FORM_WAIT", 2*time.Second),
 			// BROWSER_LAUNCH_TIMEOUT caps the launcher.Launch() + Connect()
 			// window. Defaults to the same 60s as BROWSER_TIMEOUT because the
@@ -130,7 +132,7 @@ func New() (*Config, error) {
 			BrowserLaunchTimeout: getEnvDuration("BROWSER_LAUNCH_TIMEOUT", 60*time.Second),
 		},
 		CORS: CORSConfig{
-			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"),
+			AllowOrigins: getEnv("CORS_ALLOW_ORIGINS", "*"), // production Validate rejects "*"; set explicit origins in .env for prod
 			AllowMethods: getEnv("CORS_ALLOW_METHODS", "GET,POST,OPTIONS"),
 			AllowHeaders: getEnv("CORS_ALLOW_HEADERS", "Content-Type"),
 		},
@@ -222,6 +224,41 @@ func (c *Config) Validate() error {
 		return errors.New("AUTO_LOGIN cannot be true in production")
 	}
 
+	if strings.TrimSpace(c.App.LMSBaseURL) == "" {
+		return fmt.Errorf("lms_base_url must not be empty")
+	}
+	if _, err := url.ParseRequestURI(c.App.LMSBaseURL); err != nil {
+		return fmt.Errorf("lms_base_url invalid: %w", err)
+	}
+
+	if c.App.DNSTimeout <= 0 {
+		return fmt.Errorf("dns_timeout must be > 0; got %v", c.App.DNSTimeout)
+	}
+
+	if c.App.SessionTTL <= 0 {
+		return fmt.Errorf("session_ttl must be > 0; got %v", c.App.SessionTTL)
+	}
+
+	if c.App.BrowserLaunchTimeout <= 0 {
+		return fmt.Errorf("browser_launch_timeout must be > 0; got %v", c.App.BrowserLaunchTimeout)
+	}
+
+	if strings.TrimSpace(c.App.ProfileBaseDir) == "" {
+		return fmt.Errorf("profile_base_dir must not be empty")
+	}
+
+	if c.App.Env == "production" && c.CORS.AllowOrigins == "*" {
+		return fmt.Errorf("cors_allow_origins must not be '*' in production")
+	}
+
+	if c.App.Env == "production" && strings.TrimSpace(c.App.EvalSecret) == "" {
+		return fmt.Errorf("secret_key must not be empty in production")
+	}
+
+	if c.App.MaxSessions < 0 {
+		return fmt.Errorf("max_sessions must be >= 0; got %d", c.App.MaxSessions)
+	}
+
 	return nil
 }
 
@@ -289,22 +326,24 @@ func parseByteSize(s string) int64 {
 	s = strings.TrimSpace(s)
 	s = strings.ToUpper(s)
 
-	multipliers := map[string]int64{
-		"B":  1,
-		"KB": 1024,
-		"MB": 1024 * 1024,
-		"GB": 1024 * 1024 * 1024,
+	multipliers := []struct {
+		suffix string
+		mult   int64
+	}{
+		{"GB", 1024 * 1024 * 1024},
+		{"MB", 1024 * 1024},
+		{"KB", 1024},
+		{"B", 1},
 	}
 
-	for suffix, mult := range multipliers {
-		if strings.HasSuffix(s, suffix) {
-			numStr := strings.TrimSuffix(s, suffix)
-			numStr = strings.TrimSpace(numStr)
+	for _, m := range multipliers {
+		if strings.HasSuffix(s, m.suffix) {
+			numStr := strings.TrimSpace(strings.TrimSuffix(s, m.suffix))
 			n, err := strconv.ParseInt(numStr, 10, 64)
 			if err != nil {
 				return 1024 * 1024 // default 1MB
 			}
-			return n * mult
+			return n * m.mult
 		}
 	}
 

@@ -22,6 +22,11 @@ func SetMaxPDFSize(size int64) {
 	}
 }
 
+// GetMaxPDFSize returns the current PDF size limit.
+func GetMaxPDFSize() int64 {
+	return maxPDFSize
+}
+
 // openPDF validates a PDF file exists and is within size limits, then opens it.
 func openPDF(path string) (*gopdf.Document, error) {
 	info, err := os.Stat(path)

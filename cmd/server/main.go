@@ -2,6 +2,10 @@ package main
 
 import (
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"lonceng_unman_be/internal/application/service"
 	"lonceng_unman_be/internal/config"
@@ -90,6 +94,18 @@ func main() {
 
 	// Register routes
 	router.Setup(app, healthHandler, lmsHandler, docHandler, extractionHandler, studentProfileHandler, evalHandler, evalDataHandler, evalGTHandler, authHandler, cfg)
+
+	// Graceful shutdown: SIGINT/SIGTERM triggers Fiber ShutdownWithTimeout(30s)
+	// matching compose.yml stop_grace_period 30s and stop_signal SIGTERM.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-quit
+		log.Info("shutting down server", "signal", "SIGTERM/SIGINT")
+		if err := app.ShutdownWithTimeout(30 * time.Second); err != nil {
+			log.Error("shutdown error", "err", err)
+		}
+	}()
 
 	// Start server
 	log.Info(

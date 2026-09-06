@@ -30,10 +30,13 @@ const pageTimeout = 60 * time.Second
 // (different requests) can operate concurrently because each has its own
 // page and its own mutex.
 type rodSession struct {
-	page       *rod.Page
-	mu         sync.Mutex     // per-session mutex for this rodSession's page ops
-	cachedSess *cachedSession // back-reference for release tracking
-	closed     bool           // prevents double-decrement of activeCount
+	page *rod.Page
+	mu   sync.Mutex // per-session mutex for this rodSession's page ops
+	// cachedSess is the owning cachedSession; rodSession is a per-request handle.
+	// This back-reference is intentional and does not create an import cycle
+	// because session imports browser, not vice versa.
+	cachedSess *cachedSession
+	closed     bool // prevents double-decrement of activeCount
 }
 
 // newSession creates a fresh page from the browser and wraps it in a rodSession.
@@ -352,6 +355,3 @@ var _ interface {
 	DownloadImage(string, string) (string, int, error)
 	Close() error
 } = (*rodSession)(nil)
-
-// Ensure selectors are used (prevents import cycle if browser package changes).
-var _ = browser.SelUsernameInput

@@ -30,9 +30,25 @@ func Register(app *fiber.App, corsCfg config.CORSConfig) {
 		Level: compress.LevelDefault,
 	}))
 
-	// CORS
+	// CORS — trim origins to avoid " https://a.com , https://b.com " mismatch;
+	// production Validate rejects "*" (see config.Validate).
+	origins := strings.TrimSpace(corsCfg.AllowOrigins)
+	if origins == "" {
+		origins = "*"
+	}
+	parts := strings.Split(origins, ",")
+	allowOrigins := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			allowOrigins = append(allowOrigins, t)
+		}
+	}
+	if len(allowOrigins) == 0 {
+		allowOrigins = []string{"*"}
+	}
+
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: strings.Split(corsCfg.AllowOrigins, ","),
+		AllowOrigins: allowOrigins,
 		AllowMethods: strings.Split(corsCfg.AllowMethods, ","),
 		AllowHeaders: strings.Split(corsCfg.AllowHeaders, ","),
 	}))

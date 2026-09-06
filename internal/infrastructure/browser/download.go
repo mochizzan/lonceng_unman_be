@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"lonceng_unman_be/internal/infrastructure/extractor"
+
 	"github.com/go-rod/rod"
 )
 
@@ -20,6 +22,12 @@ import (
 // go-rod's Eval wraps code in: function() { return (CODE).apply(this, arguments) }
 // So we pass an async function expression — NOT an IIFE.
 func downloadBytes(page *rod.Page, url string, expectedContentType string) ([]byte, error) {
+	// Gate: check size limits before allocating the btoa string.
+	limit := extractor.GetMaxPDFSize()
+	if limit <= 0 {
+		limit = 50 * 1024 * 1024
+	}
+
 	// Build JS: optionally check content-type header.
 	contentTypeCheck := ""
 	if expectedContentType != "" {
@@ -36,14 +44,30 @@ func downloadBytes(page *rod.Page, url string, expectedContentType string) ([]by
 			throw new Error("HTTP " + response.status + " " + response.statusText);
 		}
 		%s
+		// Pre-flight gate: Content-Length header, if present, before arrayBuffer alloc.
+		const cl = response.headers.get("content-length");
+		if (cl) {
+			const parsed = parseInt(cl, 10);
+			if (!isNaN(parsed) && parsed > %d) {
+				throw new Error("pdf size " + parsed + " exceeds limit " + %d);
+			}
+		}
 		const buffer = await response.arrayBuffer();
 		const bytes = new Uint8Array(buffer);
+		if (bytes.byteLength > %d) {
+			throw new Error("pdf size " + bytes.byteLength + " exceeds limit " + %d);
+		}
+		if (bytes.byteLength === 0) {
+			throw new Error("downloaded file is empty");
+		}
+		// Chunked btoa to avoid V8 large string alloc for PDFs >5MB.
 		let binary = "";
-		for (let i = 0; i < bytes.byteLength; i++) {
-			binary += String.fromCharCode(bytes[i]);
+		const chunk = 0x8000;
+		for (let i = 0; i < bytes.byteLength; i += chunk) {
+			binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
 		}
 		return btoa(binary);
-	}`, url, contentTypeCheck)
+	}`, url, contentTypeCheck, limit, limit, limit, limit)
 
 	result, err := page.Eval(jsCode)
 	if err != nil {
@@ -57,6 +81,11 @@ func downloadBytes(page *rod.Page, url string, expectedContentType string) ([]by
 
 	if len(data) == 0 {
 		return nil, fmt.Errorf("downloaded file is empty")
+	}
+
+	// Go-side gate as defense-in-depth (HEAD may have been absent).
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("pdf size %d exceeds limit %d", len(data), limit)
 	}
 
 	return data, nil

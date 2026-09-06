@@ -156,16 +156,21 @@ func (s *studentProfileScraper) Scrape(session port.BrowserSession, lmsBaseURL s
 	// This is more reliable than a fixed sleep — it adapts to actual page
 	// readiness instead of hoping a fixed duration is enough.
 	//
-	// Default 60s because LMS AJAX calls can be slow on cold starts or
-	// congested networks. The login flow already takes ~30s on cold starts,
-	// so data fetching can be similarly slow. SCRAPE_FORM_WAIT env var
-	// overrides but is clamped to a 10s minimum to avoid premature timeouts.
-	probeTimeout := 60 * time.Second
-	if cfg != nil && cfg.App.ScrapeFormWait > 0 {
+	// Probe window is tunable via SCRAPE_FORM_WAIT; enforced to [2s,30s]
+	// so operators can lower it for fast networks without racing the LMS
+	// AJAX population (floor 2s matches config SCRAPE_FORM_WAIT default).
+	var probeTimeout time.Duration
+	if cfg != nil {
 		probeTimeout = cfg.App.ScrapeFormWait
-		if probeTimeout < 10*time.Second {
-			probeTimeout = 10 * time.Second
-		}
+	}
+	if probeTimeout <= 0 {
+		probeTimeout = 2 * time.Second
+	}
+	if probeTimeout < 2*time.Second {
+		probeTimeout = 2 * time.Second
+	}
+	if probeTimeout > 30*time.Second {
+		probeTimeout = 30 * time.Second
 	}
 	ready := false
 	deadline := time.Now().Add(probeTimeout)

@@ -102,45 +102,41 @@ func (s *extractionService) saveParsed(
 // ExtractKRS extracts KRS data from the downloaded PDF.
 // Always re-extracts and overwrites existing cache.
 func (s *extractionService) ExtractKRS(npm string, password string) (*entity.ExtractionResult, error) {
-	if err := s.verifySession(npm, password); err != nil {
-		return nil, err
-	}
-
 	pdfPath, err := s.findKRSFile(npm)
-	if err != nil {
-		return nil, fmt.Errorf("find krs file: %w", err)
+	if err == nil {
+		extraction, parseErr := s.parser.ParseKRS(pdfPath, npm)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse krs: %w", parseErr)
+		}
+		cacheFile := entity.KRSFilePrefix + s.getKRSSemester(pdfPath) + entity.ExtJSON
+		return s.saveParsed(npm, entity.DocTypeKRS.String(), cacheFile, "KRS extracted successfully", pdfPath, extraction, &extraction.Metadata)
 	}
-
-	extraction, err := s.parser.ParseKRS(pdfPath, npm)
-	if err != nil {
-		return nil, fmt.Errorf("parse krs: %w", err)
+	// PDF missing — verify session to classify 401 vs 503.
+	if vErr := s.verifySession(npm, password); vErr != nil {
+		return nil, vErr
 	}
-
-	cacheFile := entity.KRSFilePrefix + s.getKRSSemester(pdfPath) + entity.ExtJSON
-	return s.saveParsed(npm, entity.DocTypeKRS.String(), cacheFile, "KRS extracted successfully", pdfPath, extraction, &extraction.Metadata)
+	return nil, fmt.Errorf("find krs file: %w", err)
 }
 
 // ExtractKHS extracts KHS data from the downloaded PDF.
 // Always re-extracts and overwrites existing cache.
 func (s *extractionService) ExtractKHS(npm string, password string, tahunAjaran string, semester string) (*entity.ExtractionResult, error) {
-	if err := s.verifySession(npm, password); err != nil {
-		return nil, err
-	}
-
 	semester = strings.ToUpper(semester)
 
 	pdfPath, err := s.findKHSFile(npm, tahunAjaran, semester)
-	if err != nil {
-		return nil, fmt.Errorf("find khs file: %w", err)
+	if err == nil {
+		extraction, parseErr := s.parser.ParseKHS(pdfPath, npm, tahunAjaran, semester)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse khs: %w", parseErr)
+		}
+		cacheFile := s.khsCacheFilename(tahunAjaran, semester)
+		return s.saveParsed(npm, entity.DocTypeKHS.String(), cacheFile, "KHS extracted successfully", pdfPath, extraction, &extraction.Metadata)
 	}
-
-	extraction, err := s.parser.ParseKHS(pdfPath, npm, tahunAjaran, semester)
-	if err != nil {
-		return nil, fmt.Errorf("parse khs: %w", err)
+	// PDF missing — verify session to classify 401 vs 503.
+	if vErr := s.verifySession(npm, password); vErr != nil {
+		return nil, vErr
 	}
-
-	cacheFile := s.khsCacheFilename(tahunAjaran, semester)
-	return s.saveParsed(npm, entity.DocTypeKHS.String(), cacheFile, "KHS extracted successfully", pdfPath, extraction, &extraction.Metadata)
+	return nil, fmt.Errorf("find khs file: %w", err)
 }
 
 // GetKRSExtraction retrieves cached KRS extraction.
@@ -159,15 +155,21 @@ func (s *extractionService) GetKRSExtraction(npm string) ([]byte, error) {
 		return nil, fmt.Errorf("no krs extraction for npm %s: %w", npm, apperror.ErrExtractionNotFound)
 	}
 
-	// Get the latest file
-	latest := entries[0]
-	for _, e := range entries {
-		if e.Name() > latest.Name() {
-			latest = e
+	// Numeric sort, not lexicographic (fixes P28) — symmetric with findKRSFile.
+	var bestName string
+	bestNum := -1
+	for i, e := range entries {
+		num := extractSemesterNum(e.Name())
+		if i == 0 || num > bestNum {
+			bestName = e.Name()
+			bestNum = num
+		} else if num == bestNum && num == 0 && e.Name() > bestName {
+			// Fallback lexicographic for non-semester files.
+			bestName = e.Name()
 		}
 	}
 
-	return os.ReadFile(filepath.Join(krsDir, latest.Name()))
+	return os.ReadFile(filepath.Join(krsDir, bestName))
 }
 
 // GetKHSExtraction retrieves cached KHS extraction.
