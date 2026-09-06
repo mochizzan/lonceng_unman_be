@@ -95,9 +95,11 @@ type Browser struct {
 	launchTimeout   time.Duration
 }
 
-// SetLaunchTimeout caps the post-launch window (rod.New().ControlURL() and
-// Browser.Connect()) with a deadline. Subsequent page ops inherit this
-// timeout. Zero (default) means no override — rod uses its 3-minute default.
+// SetLaunchTimeout caps only the Launch+Connect window (launcher.Launch +
+// rod.New().ControlURL().Connect). It does NOT leak to subsequent Page()
+// ops — Connect() calls CancelTimeout() after success so the stored
+// Browser uses the parent Background context again. Zero means rod's
+// 3-minute default.
 func (b *Browser) SetLaunchTimeout(d time.Duration) {
 	b.launchTimeout = d
 }
@@ -159,6 +161,9 @@ func (b *Browser) Connect(headless bool) error {
 	if err := r.Connect(); err != nil {
 		return fmt.Errorf("connect browser: %w", err)
 	}
+	if b.launchTimeout > 0 {
+		r = r.CancelTimeout()
+	}
 	b.rod = r
 	return nil
 }
@@ -214,6 +219,9 @@ func (b *Browser) ConnectWithProfile(headless bool, profileDir string) error {
 	}
 	if err := r.Connect(); err != nil {
 		return fmt.Errorf("connect browser: %w", err)
+	}
+	if b.launchTimeout > 0 {
+		r = r.CancelTimeout()
 	}
 	b.rod = r
 	return nil
