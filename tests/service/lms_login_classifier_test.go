@@ -26,6 +26,8 @@ func (m *mockSessionManager) GetOrCreate(npm, password string) (port.BrowserSess
 
 func (m *mockSessionManager) Close(npm string) error { return nil }
 func (m *mockSessionManager) CloseAll()              {}
+func (m *mockSessionManager) MarkStale(string) bool  { return false }
+func (m *mockSessionManager) Invalidate(string) bool { return false }
 
 // fakeSession is a no-op BrowserSession for the success path. None of its
 // methods are called because Login only defers Close.

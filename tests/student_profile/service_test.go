@@ -53,7 +53,9 @@ func (m *mockSessionManager) Close(npm string) error {
 	}
 	return nil
 }
-func (m *mockSessionManager) CloseAll() {}
+func (m *mockSessionManager) CloseAll()              {}
+func (m *mockSessionManager) MarkStale(string) bool  { return false }
+func (m *mockSessionManager) Invalidate(string) bool { return false }
 
 type mockStudentProfileScraper struct {
 	scrapeFunc func(session port.BrowserSession, lmsBaseURL string, cfg *config.Config) (*entity.StudentProfile, error)

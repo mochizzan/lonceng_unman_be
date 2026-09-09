@@ -53,6 +53,8 @@ services:
       EVAL_DIR: /data/eval/ground_truth
       # Pure ephemeral: no PROFILE_BASE_DIR bind-mount (in-memory TTL 15m)
       PROFILE_BASE_DIR: ""
+      # Dev override for fast repro: SESSION_TTL=1m docker compose up -d (F account-switch 70s vs 10m)
+      SESSION_TTL: "${SESSION_TTL:-15m}"
 
     # --- DNS Configuration ---
     # Use reliable public DNS for LMS domain resolution

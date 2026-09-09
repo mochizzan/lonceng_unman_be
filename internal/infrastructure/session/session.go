@@ -209,9 +209,16 @@ func (s *rodSession) Navigate(url string) error {
 			slog.Warn("[DIAG-NAV] waitReady failed", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "elapsed", elapsed, "error", err)
 			// If the page is a logout/login shell after waitReady timeout,
 			// don't spin 3×15s — fail fast with ErrLMSExpired so the caller
-			// can evict and re-login once (backend 24h vs LMS menit).
+			// can evict and re-login once (backend TTL 15m vs LMS PHP menit).
+			// Probe may hang (context deadline) when CDP wedged — treat that as expired too.
 			if sel := navigateReadySelector(url); sel != "" {
-				if s.isLMSExpiredProbe(page, sel) {
+				probeExpired := s.isLMSExpiredProbe(page, sel)
+				// #nim is unique to logged-in viewupdate; missing #nim after 15s
+				// almost always means LMS PHP GC'd the session (no alert banner).
+				// Fail fast on first attempt instead of 3×15s = 1m13s.
+				isNimWaitTimeout := sel == "#nim" && isTimeout(err)
+				if probeExpired || isNimWaitTimeout {
+					slog.Warn("[DIAG-NAV] LMS expired fast-fail (probe or #nim timeout)", "npm", s.cachedSess.npm, "sel", sel, "probeExpired", probeExpired, "isNimTimeout", isNimWaitTimeout)
 					return fmt.Errorf("%w: probe %q missing after %v: %w", ErrLMSExpired, sel, elapsed, lastErr)
 				}
 			}
@@ -226,12 +233,18 @@ func (s *rodSession) Navigate(url string) error {
 	}
 	// If all 3 retries exhausted because waitElementReady timed out, check if it
 	// is actually LMS expiry (s.page is the last attempt's page — replacePage
-	// keeps s.page in sync). Probe comment: s.page valid here because each
-	// attempt either reused or replaced it; if Navigate never succeeded,
-	// probe returns false (generic exhausted is correct).
+	// keeps s.page in sync). Probe may itself hang (context deadline) when
+	// CDP target is wedged after LMS returns shell without #nim — treat that
+	// as expired too so caller can evict + re-login once (in-memory TTL vs PHP menit).
 	if sel := navigateReadySelector(url); sel != "" {
-		if s.isLMSExpiredProbe(s.page, sel) {
-			slog.Warn("[DIAG-NAV] navigate exhausted but LMS expired — bubbling sentinel", "npm", s.cachedSess.npm, "url", url, "total_elapsed", time.Since(navStart))
+		probeExpired := s.isLMSExpiredProbe(s.page, sel)
+		isWaitTimeout := lastErr != nil && strings.Contains(strings.ToLower(lastErr.Error()), "wait element")
+		// If wait timed out on a landmark selector (#nim), missing landmark
+		// almost always means LMS PHP session expired (no 302, shell 200 without form).
+		// Even if probe missed/hung, bubble ErrLMSExpired so Service retries fresh login
+		// instead of spinning 64s generic.
+		if probeExpired || isWaitTimeout {
+			slog.Warn("[DIAG-NAV] navigate exhausted — treating as LMS expired (wait timeout or probe)", "npm", s.cachedSess.npm, "url", url, "total_elapsed", time.Since(navStart), "probeExpired", probeExpired, "isWaitTimeout", isWaitTimeout)
 			return fmt.Errorf("%w: after 3 attempts %v: %w", ErrLMSExpired, sel, lastErr)
 		}
 	}

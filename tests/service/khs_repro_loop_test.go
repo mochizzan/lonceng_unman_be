@@ -71,6 +71,8 @@ func (m *reproManager) GetOrCreate(npm, password string) (port.BrowserSession, e
 }
 func (m *reproManager) Close(npm string) error { return nil }
 func (m *reproManager) CloseAll()              {}
+func (m *reproManager) MarkStale(string) bool  { return false }
+func (m *reproManager) Invalidate(string) bool { return false }
 
 // TestLoop_KHSRepro_TightSignal is the tight red-capable loop for paste-1.md:
 // DOWNLOAD_DETAIL → 503 infrastructure → session corrupted → next Page() 503.

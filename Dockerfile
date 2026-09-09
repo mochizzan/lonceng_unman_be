@@ -10,8 +10,6 @@
 FROM golang:1.26.4-alpine AS builder
 
 ARG APP_NAME=lonceng_unman_be
-ARG BUILD_TIME
-ARG VERSION
 
 RUN apk add --no-cache git upx
 
@@ -21,6 +19,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+ARG VERSION
+ARG BUILD_TIME
 
 # Build & compress binary (~20MB → ~6MB with UPX)
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \

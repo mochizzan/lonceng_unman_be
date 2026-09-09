@@ -53,7 +53,9 @@ func (m *mockSessionManager) Close(npm string) error {
 	}
 	return nil
 }
-func (m *mockSessionManager) CloseAll() {}
+func (m *mockSessionManager) CloseAll()                  {}
+func (m *mockSessionManager) MarkStale(npm string) bool  { return false }
+func (m *mockSessionManager) Invalidate(npm string) bool { return m.MarkStale(npm) }
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -443,6 +443,32 @@ func (m *Manager) evictSession(npm string) {
 	}
 }
 
+// MarkStale implements port.SessionManager. Always-fresh-on-error:
+// when ANY BrowserSession op fails (Navigate timeout via #nim,
+// DownloadPDF, Eval, ElementAttribute), caller calls MarkStale so
+// next GetOrCreate gets a fresh Browser (ephemeral, no UserDataDir,
+// TTL15m reuse otherwise). Idempotent, no per-NPM lock, closes
+// outside m.mu like evictSession to avoid blocking.
+func (m *Manager) MarkStale(npm string) bool {
+	m.mu.Lock()
+	sess, ok := m.sessions[npm]
+	if ok {
+		delete(m.sessions, npm)
+	}
+	m.mu.Unlock()
+	if !ok {
+		return false
+	}
+	sess.mu.Lock()
+	_ = sess.browser.Close()
+	sess.mu.Unlock()
+	slog.Info("session marked stale (fresh-on-error)", "npm", npm)
+	return true
+}
+
+// Invalidate is an alias of MarkStale for cache terminology.
+func (m *Manager) Invalidate(npm string) bool { return m.MarkStale(npm) }
+
 // Close releases the session for the given NPM.
 func (m *Manager) Close(npm string) error {
 	npmMu := m.getNPMLock(npm)

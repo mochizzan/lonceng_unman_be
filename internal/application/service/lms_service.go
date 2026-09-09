@@ -238,26 +238,29 @@ func classifyLoginErrorKind(msg string) loginErrorKind {
 	return loginErrorKindUnknown
 }
 
-// navigateWithLMSRetry wraps session.Navigate with a single retry on
-// port.ErrLMSExpired: backend 24h still valid but LMS PHP (menit) has
-// expired → evict + re-login fresh via GetOrCreate, then Navigate once
-// more. Exactly one retry; all other errors are returned as-is.
+// navigateWithLMSRetry wraps session.Navigate with always-fresh-on-error:
+// - ErrLMSExpired (backend TTL vs LMS PHP GC) → MarkStale + evict + re-login once, then Navigate again.
+// - IsTransientBrowserError (EOF/deadline/timeout/closed network/target closed/detached) → MarkStale + evict so next GetOrCreate is fresh (session 503 bug fix).
 func (s *lmsDocumentService) navigateWithLMSRetry(sess port.BrowserSession, url, npm, password string) (port.BrowserSession, error) {
 	if err := sess.Navigate(url); err != nil {
-		if !errors.Is(err, port.ErrLMSExpired) {
-			return sess, err
+		if errors.Is(err, port.ErrLMSExpired) {
+			slog.Warn("lms session expired during navigate — mark stale and re-login once", "npm", npm, "url", url, "error", err)
+			s.sessions.MarkStale(npm)
+			_ = sess.Close()
+			fresh, gerr := s.sessions.GetOrCreate(npm, password)
+			if gerr != nil {
+				return fresh, fmt.Errorf("re-login after lms expiry: %w", gerr)
+			}
+			if err2 := fresh.Navigate(url); err2 != nil {
+				return fresh, fmt.Errorf("navigate after re-login: %w", err2)
+			}
+			return fresh, nil
 		}
-		slog.Warn("lms session expired during navigate — evicting and re-login once", "npm", npm, "url", url, "error", err)
-		_ = sess.Close()
-		_ = s.sessions.Close(npm)
-		fresh, gerr := s.sessions.GetOrCreate(npm, password)
-		if gerr != nil {
-			return fresh, fmt.Errorf("re-login after lms expiry: %w", gerr)
+		// Transient CDP/browser error (closed network/deadline/timeout/target closed/detached) → stale session per spec A; 404/401 stays cached.
+		if isTransientBrowserError(err) {
+			s.sessions.MarkStale(npm)
 		}
-		if err2 := fresh.Navigate(url); err2 != nil {
-			return fresh, fmt.Errorf("navigate after re-login: %w", err2)
-		}
-		return fresh, nil
+		return sess, err
 	}
 	return sess, nil
 }
@@ -290,6 +293,9 @@ func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity
 	// Extract semester number from the page.
 	semesterNum, err := session.ElementAttribute(port.SelKRSSemesterInput, "value")
 	if err != nil {
+		if errors.Is(err, port.ErrLMSExpired) || isTransientBrowserError(err) {
+			s.sessions.MarkStale(req.NPM)
+		}
 		return nil, fmt.Errorf("extract semester: %w", err)
 	}
 	slog.Info("KRS semester extracted", "npm", req.NPM, "semester", semesterNum)
@@ -304,6 +310,9 @@ func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity
 
 	filename, size, err := session.DownloadPDF(krsURL, savePath)
 	if err != nil {
+		if isTransientBrowserError(err) {
+			s.sessions.MarkStale(req.NPM)
+		}
 		return nil, fmt.Errorf("download KRS PDF: %w", err)
 	}
 
@@ -370,6 +379,9 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 
 	result, err := session.Eval(jsCode)
 	if err != nil {
+		if isTransientBrowserError(err) {
+			s.sessions.MarkStale(req.NPM)
+		}
 		return nil, fmt.Errorf("parse KHS semesters: %w", err)
 	}
 
@@ -428,6 +440,9 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 	// Find the CETAK KHS button to get the PDF URL.
 	href, err := session.ElementHref(port.SelKHSCetakBtn)
 	if err != nil {
+		if errors.Is(err, port.ErrLMSExpired) || isTransientBrowserError(err) {
+			s.sessions.MarkStale(req.NPM)
+		}
 		return nil, fmt.Errorf("find CETAK KHS button: %w", err)
 	}
 
@@ -439,6 +454,9 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 
 	filename, size, err := session.DownloadPDF(pdfURL, savePath)
 	if err != nil {
+		if isTransientBrowserError(err) {
+			s.sessions.MarkStale(req.NPM)
+		}
 		return nil, fmt.Errorf("download KHS PDF: %w", err)
 	}
 
@@ -520,6 +538,9 @@ func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (str
 
 	href, err := session.ElementHref(port.SelKHSCetakBtn)
 	if err != nil {
+		if errors.Is(err, port.ErrLMSExpired) || isTransientBrowserError(err) {
+			s.sessions.MarkStale(req.NPM)
+		}
 		return "", 0, fmt.Errorf("find CETAK KHS button: %w", err)
 	}
 
@@ -529,6 +550,9 @@ func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (str
 	filename, size, err := session.DownloadPDF(pdfURL, filePath)
 	_ = filename
 	if err != nil {
+		if isTransientBrowserError(err) {
+			s.sessions.MarkStale(req.NPM)
+		}
 		return "", 0, fmt.Errorf("download KHS PDF: %w", err)
 	}
 
@@ -542,4 +566,18 @@ func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (str
 	_ = size
 	slog.Info("serving KHS file (fallback complete)", "npm", req.NPM, "path", filePath, "size", info.Size())
 	return filePath, info.Size(), nil
+}
+
+// isTransientBrowserError mirrors browser.IsTransientBrowserError without import cycle.
+// Spec A: only these bubble MarkStale; 401/404 credential stays cached.
+func isTransientBrowserError(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "eof") ||
+		strings.Contains(m, "deadline") ||
+		strings.Contains(m, "timeout") ||
+		strings.Contains(m, "closed network") ||
+		strings.Contains(m, "closed")
 }

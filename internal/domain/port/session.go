@@ -24,4 +24,16 @@ type SessionManager interface {
 
 	// CloseAll releases all cached sessions.
 	CloseAll()
+
+	// MarkStale evicts the cached browser for npm if present and closes it.
+	// Safe to call concurrently and when no session cached. Returns true if
+	// a session was evicted. Always-fresh-on-error policy: call after ANY
+	// BrowserSession op failure (Navigate timeout, DownloadPDF, Eval,
+	// ElementAttribute, etc.) so the next GetOrCreate gets a fresh Browser
+	// (pure ephemeral TTL15m, no UserDataDir). Idempotent; no npmLock.
+	// Minimal interface change — one method, no BrowserSession change.
+	MarkStale(npm string) bool
+
+	// Invalidate is an alias of MarkStale for callers preferring cache terminology.
+	Invalidate(npm string) bool
 }

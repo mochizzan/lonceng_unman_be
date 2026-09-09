@@ -41,6 +41,8 @@ func (m *h1Manager) GetOrCreate(npm, password string) (port.BrowserSession, erro
 }
 func (m *h1Manager) Close(npm string) error { return nil }
 func (m *h1Manager) CloseAll()              {}
+func (m *h1Manager) MarkStale(string) bool  { return false }
+func (m *h1Manager) Invalidate(string) bool { return false }
 
 func TestH1_NavigateTimeoutMapsTo503Not401(t *testing.T) {
 	cfg := &config.Config{App: config.AppConfig{DownloadDir: t.TempDir(), LMSBaseURL: "https://elearning.universitasmandiri.ac.id"}}
