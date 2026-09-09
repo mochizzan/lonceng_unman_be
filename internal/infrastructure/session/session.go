@@ -1,12 +1,14 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
+	"lonceng_unman_be/internal/domain/port"
 	"lonceng_unman_be/internal/infrastructure/browser"
 
 	"github.com/go-rod/rod"
@@ -136,14 +138,13 @@ func (s *rodSession) touchLastUsed() {
 	s.cachedSess.mu.Unlock()
 }
 
-// Navigate loads the given URL and waits for the page to be ready.
-// It retries on timeout errors and resets page state via about:blank
-// to avoid the "stale page" issue where subsequent navigations fail.
+// Navigate loads the given URL and waits until a page-specific landmark element
+// appears (Method D — e.g. form/KHS table) or, if unknown URL, until DOM
+// interactive (fallback). Retries on timeout and resets via about:blank to
+// avoid stale page reuse.
 //
-// [DIAG-NAV] instrumentation: every phase (reset, navigate, waitLoad)
-// logs with elapsed latency so H1 (CDP target hang, stale page reuse),
-// H2 (per-call timeout vs global deadline), and H4 (LMS throttle → WaitLoad
-// hang) can be distinguished. Tagged [DIAG-NAV] for single-grep cleanup.
+// [DIAG-NAV] instrumentation: every phase (reset, navigate, waitReady)
+// logs elapsed latency — H1 (CDP hang), H2 (deadline), H4 (LMS hang).
 func (s *rodSession) Navigate(url string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -199,12 +200,20 @@ func (s *rodSession) Navigate(url string) error {
 			// Non-timeout error, don't retry.
 			return lastErr
 		}
-		slog.Debug("[DIAG-NAV] navigate ok, waiting load", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "elapsed", time.Since(attemptStart))
+		slog.Debug("[DIAG-NAV] navigate ok, waiting ready", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "elapsed", time.Since(attemptStart))
 		waitStart := time.Now()
-		if err := page.WaitLoad(); err != nil {
+		if err := s.waitReady(page, url); err != nil {
 			elapsed := time.Since(waitStart)
 			lastErr = fmt.Errorf("wait load %s (attempt %d): %w", url, attempt+1, err)
-			slog.Warn("[DIAG-NAV] waitLoad failed", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "elapsed", elapsed, "error", err)
+			slog.Warn("[DIAG-NAV] waitReady failed", "npm", s.cachedSess.npm, "url", url, "attempt", attempt+1, "elapsed", elapsed, "error", err)
+			// If the page is a logout/login shell after waitReady timeout,
+			// don't spin 3×15s — fail fast with ErrLMSExpired so the caller
+			// can evict and re-login once (backend 24h vs LMS menit).
+			if sel := navigateReadySelector(url); sel != "" {
+				if s.isLMSExpiredProbe(page, sel) {
+					return fmt.Errorf("%w: probe %q missing after %v: %w", ErrLMSExpired, sel, elapsed, lastErr)
+				}
+			}
 			if isTimeout(err) {
 				continue
 			}
@@ -214,8 +223,179 @@ func (s *rodSession) Navigate(url string) error {
 		// Success.
 		return nil
 	}
+	// If all 3 retries exhausted because waitElementReady timed out, check if it
+	// is actually LMS expiry (s.page is the last attempt's page — replacePage
+	// keeps s.page in sync). Probe comment: s.page valid here because each
+	// attempt either reused or replaced it; if Navigate never succeeded,
+	// probe returns false (generic exhausted is correct).
+	if sel := navigateReadySelector(url); sel != "" {
+		if s.isLMSExpiredProbe(s.page, sel) {
+			slog.Warn("[DIAG-NAV] navigate exhausted but LMS expired — bubbling sentinel", "npm", s.cachedSess.npm, "url", url, "total_elapsed", time.Since(navStart))
+			return fmt.Errorf("%w: after 3 attempts %v: %w", ErrLMSExpired, sel, lastErr)
+		}
+	}
 	slog.Warn("[DIAG-NAV] navigate exhausted", "npm", s.cachedSess.npm, "url", url, "total_elapsed", time.Since(navStart), "lastErr", lastErr)
 	return fmt.Errorf("navigate to %s failed after 3 attempts: %w", url, lastErr)
+}
+
+// navigateReadySelector returns the element selector to wait for after Navigate(url).
+// Methode D: condition-based wait on a specific DOM element, bukan window.onload.
+// Map URL → selector spesifik halaman (lebih presisi dari waitDomReady).
+// Jika URL tidak match map, fallback ke waitDomReady (poll readyState).
+func navigateReadySelector(url string) string {
+	switch {
+	case strings.Contains(url, "op=data_mahasiswa&act=viewupdate"):
+		return "form" // student-profile viewupdate: mega-form 55 field
+	case strings.Contains(url, "op=master_mahasiswa&act=konversi_upd_mhs"):
+		return "input[name='semester']" // KRS page: SelKRSSemesterInput
+	case strings.Contains(url, "op=mahasiswa_khs&act=cetak"):
+		// cetak (list) dan cetak_detail share prefix — dibedakan order:
+		if strings.Contains(url, "cetak_detail") {
+			return "a[href*='khs_pdf.php']" // KHS detail: CETAK button SelKHSCetakBtn
+		}
+		return ".table-bordered" // KHS list: SelKHSTable
+	default:
+		return "" // fallback → waitDomReady
+	}
+}
+
+// ErrLMSExpired aliases port.ErrLMSExpired for callers that already import session.
+// New code should import port.ErrLMSExpired directly.
+var ErrLMSExpired = port.ErrLMSExpired
+
+// isElementTimeout reports a hard CDP/page timeout (target detached/hung) that
+// should abort immediately. A plain "element not found" must NOT be treated
+// as hard timeout — it means the DOM is up but selector is absent (e.g.
+// logout page has no form). The previous bug treated the 3s per-poll
+// Element timeout as hard deadline and returned after 3s instead of polling
+// until elemTimeout 15s.
+func isElementTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// Rod returns "context deadline exceeded" for both poll timeout and page
+	// hang. Distinguish: "target closed" / "detached" / "browser has been closed"
+	// are genuine CDP failures → hard abort. Plain element-not-found contains
+	// "could not find element" / "element not found" → soft, keep polling.
+	if strings.Contains(msg, "target closed") ||
+		strings.Contains(msg, "detached") ||
+		strings.Contains(msg, "browser has been closed") ||
+		strings.Contains(msg, "session closed") {
+		return true
+	}
+	// If it is a plain 3s poll timeout without CDP detachment, let the outer
+	// 15s loop continue — the form may appear late.
+	return false
+}
+
+// waitElementReady polls until selector exists in DOM (method D).
+// Lebih spesifik dari waitDomReady — yang ditunggu element, bukan readyState.
+func (s *rodSession) waitElementReady(page *rod.Page, selector string) error {
+	const elemTimeout = 15 * time.Second
+	const pollInterval = 200 * time.Millisecond
+	const pollTimeout = 3 * time.Second
+	deadline := time.Now().Add(elemTimeout)
+	for time.Now().Before(deadline) {
+		el, err := page.Timeout(pollTimeout).Element(selector)
+		if err == nil && el != nil {
+			slog.Debug("[DIAG-NAV] element ready", "npm", s.cachedSess.npm, "selector", selector)
+			return nil
+		}
+		if err != nil && isElementTimeout(err) {
+			return err
+		}
+		// Not found / poll timeout (expected until DOM paints) — poll.
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("wait element %q: context deadline exceeded (not found for %v)", selector, elemTimeout)
+}
+
+// waitDomReady polls document.readyState until it leaves "loading"
+// (interactive or complete) — the DOM is then usable for ElementExists/Eval.
+// Fallback jika URL tidak punya selector spesifik di navigateReadySelector.
+// See: rod lib/js/helper.js waitLoad() = Promise(window.addEventListener('load'))
+// vs. document.readyState polling.
+func (s *rodSession) waitDomReady(page *rod.Page) error {
+	const domReadyTimeout = 15 * time.Second
+	const pollInterval = 200 * time.Millisecond
+	const pollTimeout = 3 * time.Second
+	deadline := time.Now().Add(domReadyTimeout)
+	for time.Now().Before(deadline) {
+		result, err := page.Timeout(pollTimeout).Eval(`() => document.readyState`)
+		if err != nil {
+			if isElementTimeout(err) {
+				return err
+			}
+			// Transient eval error (e.g. execution context not yet created
+			// during navigation commit) — brief backoff then retry.
+			time.Sleep(pollInterval)
+			continue
+		}
+		raw := result.Value.Str()
+		// rod Eval returns JSON-encoded string: "\"interactive\""
+		raw = strings.Trim(raw, "\"' ")
+		raw = strings.ToLower(raw)
+		if raw == "interactive" || raw == "complete" {
+			slog.Debug("[DIAG-NAV] dom ready", "npm", s.cachedSess.npm, "readyState", raw)
+			return nil
+		}
+		// Still "loading" (or empty during commit) — poll.
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("wait dom ready: context deadline exceeded (readyState stayed loading for %v)", domReadyTimeout)
+}
+
+// isLMSExpiredProbe checks whether the current page is a logout/login shell
+// instead of the requested resource. LMS PHP expired returns 200 HTML with
+// `alert('Anda Sudah Logout')` / `.alert-danger` / href logout and no target
+// landmark, not a 302. Lightweight: one Eval + one Info (each 3s capped).
+func (s *rodSession) isLMSExpiredProbe(page *rod.Page, expectedSelector string) bool {
+	// Fast URL check first (no Eval cost if already redirected).
+	if info, err := page.Info(); err == nil {
+		u := strings.ToLower(info.URL)
+		if strings.Contains(u, "logout") || strings.Contains(u, "op=login") {
+			slog.Info("[DIAG-NAV] lms expired detected via URL", "npm", s.cachedSess.npm, "url", info.URL)
+			return true
+		}
+	}
+	// HTML content check — LMS expired pages contain alert() + no expected element.
+	selJSON, _ := json.Marshal(expectedSelector)
+	js := fmt.Sprintf(`() => {
+		const sel = %s;
+		const h = document.documentElement ? document.documentElement.outerHTML : "";
+		const hasAlert = h.includes("Anda Sudah Logout") || h.includes("Sesi berakhir") || h.includes("Sudah Logout") || h.includes("session expired") || h.includes("alert-danger");
+		let hasExpected = false;
+		try { hasExpected = !!document.querySelector(sel); } catch(e) {}
+		return JSON.stringify({hasAlert, hasExpected, len: h.length});
+	}`, string(selJSON))
+	res, err := page.Timeout(3 * time.Second).Eval(js)
+	if err != nil {
+		return false
+	}
+	raw := strings.ToLower(res.Value.Str())
+	// raw is JSON-encoded string like "\"{\\\"hasAlert\\\":true,...}\""
+	if strings.Contains(raw, "hasalert") && strings.Contains(raw, "true") {
+		// Confirm missing expected element to avoid false positive on error banners inside real page.
+		if strings.Contains(raw, "hasexpected") && strings.Contains(raw, "false") {
+			slog.Info("[DIAG-NAV] lms expired detected via HTML alert + missing selector", "npm", s.cachedSess.npm, "selector", expectedSelector)
+			return true
+		}
+		// Even without confirming absence, an alert-danger on the page is strong signal.
+		if strings.Contains(raw, "alert-danger") {
+			slog.Info("[DIAG-NAV] lms expired detected via alert-danger", "npm", s.cachedSess.npm)
+			return true
+		}
+	}
+	return false
+}
+
+// waitReady dispatches to method D (element-specific) or fallback B (domReady).
+func (s *rodSession) waitReady(page *rod.Page, url string) error {
+	if sel := navigateReadySelector(url); sel != "" {
+		return s.waitElementReady(page, sel)
+	}
+	return s.waitDomReady(page)
 }
 
 // Eval executes JavaScript on the page and returns the result as a string.

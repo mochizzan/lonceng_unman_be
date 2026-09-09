@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -53,21 +54,45 @@ func NewStudentProfileService(
 	}
 }
 
+// doScrape is the inner scrape after a valid session.
+func (s *studentProfileService) doScrape(sess port.BrowserSession, req entity.StudentProfileRequest) (*entity.StudentProfile, error) {
+	return s.scraper.Scrape(sess, s.cfg.App.LMSBaseURL, s.cfg)
+}
+
 // Scrape always scrapes fresh from LMS, overwriting existing cache.
+// If LMS PHP session has expired (backend 24h still "valid" but LMS menit has GC'd),
+// detect ErrLMSExpired from Navigate, evict once, re-login fresh and retry exactly once.
 func (s *studentProfileService) Scrape(req entity.StudentProfileRequest) (*entity.StudentProfileResult, error) {
 	// 1. Get or create session (auto-login)
-	session, err := s.sessions.GetOrCreate(req.NPM, req.Password)
+	sess, err := s.sessions.GetOrCreate(req.NPM, req.Password)
 	if err != nil {
 		slog.Warn("student profile session failed", "npm", req.NPM, "error", err)
 		return nil, fmt.Errorf("get session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = sess.Close() }()
 
-	// 2. Scrape profile (pass base URL for full navigation)
-	profile, err := s.scraper.Scrape(session, s.cfg.App.LMSBaseURL, s.cfg)
+	// 2. Scrape profile. On LMS expiry, evict once and retry with fresh login.
+	profile, err := s.doScrape(sess, req)
 	if err != nil {
-		slog.Warn("student profile scrape failed", "npm", req.NPM, "error", err)
-		return nil, fmt.Errorf("scrape profile: %w", err)
+		if errors.Is(err, port.ErrLMSExpired) {
+			slog.Warn("lms session expired during scrape — evicting and re-login once", "npm", req.NPM, "error", err)
+			_ = sess.Close()
+			_ = s.sessions.Close(req.NPM)
+			fresh, gerr := s.sessions.GetOrCreate(req.NPM, req.Password)
+			if gerr != nil {
+				return nil, fmt.Errorf("re-login after lms expiry: %w", gerr)
+			}
+			sess = fresh
+			// defer above will close fresh; avoid double-close leak on early return.
+			profile, err = s.doScrape(sess, req)
+			if err != nil {
+				slog.Warn("student profile scrape failed after re-login", "npm", req.NPM, "error", err)
+				return nil, fmt.Errorf("scrape profile after re-login: %w", err)
+			}
+		} else {
+			slog.Warn("student profile scrape failed", "npm", req.NPM, "error", err)
+			return nil, fmt.Errorf("scrape profile: %w", err)
+		}
 	}
 
 	// 3. Marshal to JSON
@@ -134,12 +159,27 @@ func (s *studentProfileService) GetPhoto(req entity.StudentProfileRequest) ([]by
 	if err != nil {
 		return nil, "", fmt.Errorf("get session: %w", err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
-	// 3. Navigate to dashboard
+	// 3. Navigate to dashboard — retry once if LMS expired (backend 24h vs LMS menit)
 	dashboardURL := s.cfg.App.LMSBaseURL + "/admin/"
 	if err := sess.Navigate(dashboardURL); err != nil {
-		return nil, "", fmt.Errorf("navigate to dashboard: %w", err)
+		if errors.Is(err, port.ErrLMSExpired) {
+			slog.Warn("lms session expired during photo navigate — evicting and re-login once", "npm", req.NPM, "error", err)
+			_ = sess.Close()
+			_ = s.sessions.Close(req.NPM)
+			fresh, gerr := s.sessions.GetOrCreate(req.NPM, req.Password)
+			if gerr != nil {
+				return nil, "", fmt.Errorf("re-login after lms expiry: %w", gerr)
+			}
+			sess = fresh
+			// fresh will be closed by outer defer (captures var sess by ref)
+			if err2 := sess.Navigate(dashboardURL); err2 != nil {
+				return nil, "", fmt.Errorf("navigate to dashboard after re-login: %w", err2)
+			}
+		} else {
+			return nil, "", fmt.Errorf("navigate to dashboard: %w", err)
+		}
 	}
 
 	// 4. Wait for page to fully render (photo may load dynamically).

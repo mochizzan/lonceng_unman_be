@@ -162,6 +162,58 @@ func (m *Manager) profileDir(npm string) string {
 	return filepath.Join(m.cfg.App.ProfileBaseDir, npm)
 }
 
+// managerIsTimeout kept for backward-compat alias; wait* loops use isElementTimeout.
+func managerIsTimeout(err error) bool { return isElementTimeout(err) }
+
+// waitElementReady waits for a specific DOM element (method D) — more
+// specific than waitDomReady (which only checks readyState). The spec says
+// "tunggu element dari DOM nya" — so each page waits for its own landmark.
+func waitElementReady(page *rod.Page, selector string) error {
+	const elemTimeout = 15 * time.Second
+	const pollInterval = 200 * time.Millisecond
+	const pollTimeout = 3 * time.Second
+	deadline := time.Now().Add(elemTimeout)
+	for time.Now().Before(deadline) {
+		el, err := page.Timeout(pollTimeout).Element(selector)
+		if err == nil && el != nil {
+			return nil
+		}
+		if err != nil && isElementTimeout(err) {
+			return err
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("wait element %q: context deadline exceeded (not found for %v)", selector, elemTimeout)
+}
+
+// waitDomReady polls document.readyState until interactive/complete.
+// Fallback jika halaman tidak punya selector spesifik.
+// Replaces page.WaitLoad() (window.onload) which hangs 60s on LMS pages
+// where hanging XHR keeps window.onload from firing while DOM is already
+// usable.
+func waitDomReady(page *rod.Page) error {
+	const domReadyTimeout = 15 * time.Second
+	const pollInterval = 200 * time.Millisecond
+	const pollTimeout = 3 * time.Second
+	deadline := time.Now().Add(domReadyTimeout)
+	for time.Now().Before(deadline) {
+		result, err := page.Timeout(pollTimeout).Eval(`() => document.readyState`)
+		if err != nil {
+			if isElementTimeout(err) {
+				return err
+			}
+			time.Sleep(pollInterval)
+			continue
+		}
+		raw := strings.ToLower(strings.Trim(result.Value.Str(), "\"' "))
+		if raw == "interactive" || raw == "complete" {
+			return nil
+		}
+		time.Sleep(pollInterval)
+	}
+	return fmt.Errorf("wait dom ready: context deadline exceeded (readyState stayed loading for %v)", domReadyTimeout)
+}
+
 // validateSession checks whether the restored session is still authenticated
 // by navigating to the dashboard URL and checking for dashboard-specific DOM.
 func (m *Manager) validateSession(page *rod.Page) error {
@@ -175,7 +227,8 @@ func (m *Manager) validateSession(page *rod.Page) error {
 	if err := page.Navigate(dashboardURL); err != nil {
 		return fmt.Errorf("navigate to dashboard: %w", err)
 	}
-	if err := page.WaitLoad(); err != nil {
+	// D: wait for dashboard landmark .wrapper, not window.onload
+	if err := waitElementReady(page, browserInfra.SelSuccessIndicator); err != nil {
 		return fmt.Errorf("wait dashboard load: %w", err)
 	}
 
@@ -185,10 +238,6 @@ func (m *Manager) validateSession(page *rod.Page) error {
 	}
 	if !strings.Contains(info.URL, "/admin/") {
 		return fmt.Errorf("session expired: redirected to %s", info.URL)
-	}
-
-	if _, err := page.Element(browserInfra.SelSuccessIndicator); err != nil {
-		return fmt.Errorf("session expired: .wrapper not found on %s", info.URL)
 	}
 
 	return nil
@@ -212,7 +261,8 @@ func (m *Manager) createSessionWithRestore(npm, password string, profileDir stri
 		_ = br.Close()
 		return m.createSession(npm, password)
 	}
-	if err := page.WaitLoad(); err != nil {
+	// D: dashboard restore → tunggu .wrapper spesifik, bukan readyState
+	if err := waitElementReady(page, browserInfra.SelSuccessIndicator); err != nil {
 		_ = br.Close()
 		return m.createSession(npm, password)
 	}
@@ -583,7 +633,8 @@ func (m *Manager) createSession(npm, password string) (*cachedSession, error) {
 		_ = br.Close()
 		return nil, fmt.Errorf("open login page: %w", err)
 	}
-	if err := page.WaitLoad(); err != nil {
+	// D: login page → tunggu input username spesifik
+	if err := waitElementReady(page, browserInfra.SelUsernameInput); err != nil {
 		_ = br.Close()
 		return nil, fmt.Errorf("wait login page load: %w", err)
 	}
@@ -664,7 +715,8 @@ func (m *Manager) login(page *rod.Page, npm, password string) error {
 		return fmt.Errorf("%s", errorText)
 	}
 
-	if err := page.WaitLoad(); err != nil {
+	// D: dashboard after login → tunggu .wrapper spesifik
+	if err := waitElementReady(page, browserInfra.SelSuccessIndicator); err != nil {
 		return fmt.Errorf("wait dashboard load: %w", err)
 	}
 

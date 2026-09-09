@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -91,7 +92,7 @@ func (s *lmsService) Login(req entity.LoginRequest) (*entity.LoginResult, int, e
 		slog.Warn("login failed", "npm", req.NPM, "error", err)
 		return classifyLoginResult(req.NPM, err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	slog.Info("login successful", "npm", req.NPM)
 	return &entity.LoginResult{
@@ -237,6 +238,30 @@ func classifyLoginErrorKind(msg string) loginErrorKind {
 	return loginErrorKindUnknown
 }
 
+// navigateWithLMSRetry wraps session.Navigate with a single retry on
+// port.ErrLMSExpired: backend 24h still valid but LMS PHP (menit) has
+// expired → evict + re-login fresh via GetOrCreate, then Navigate once
+// more. Exactly one retry; all other errors are returned as-is.
+func (s *lmsDocumentService) navigateWithLMSRetry(sess port.BrowserSession, url, npm, password string) (port.BrowserSession, error) {
+	if err := sess.Navigate(url); err != nil {
+		if !errors.Is(err, port.ErrLMSExpired) {
+			return sess, err
+		}
+		slog.Warn("lms session expired during navigate — evicting and re-login once", "npm", npm, "url", url, "error", err)
+		_ = sess.Close()
+		_ = s.sessions.Close(npm)
+		fresh, gerr := s.sessions.GetOrCreate(npm, password)
+		if gerr != nil {
+			return fresh, fmt.Errorf("re-login after lms expiry: %w", gerr)
+		}
+		if err2 := fresh.Navigate(url); err2 != nil {
+			return fresh, fmt.Errorf("navigate after re-login: %w", err2)
+		}
+		return fresh, nil
+	}
+	return sess, nil
+}
+
 // DownloadKRS downloads the KRS PDF for the given student.
 // Flow: get session → navigate to KRS page → extract semester → download PDF.
 // The browser phase is serialized per-NPM so concurrent downloads for the same
@@ -250,14 +275,16 @@ func (s *lmsDocumentService) DownloadKRS(req entity.KRSDownloadRequest) (*entity
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
-	// Navigate to KRS page to extract semester number.
+	// Navigate to KRS page — retry once if LMS PHP session expired (backend 24h vs LMS menit).
 	krsPageURL := s.cfg.App.LMSBaseURL + port.KRSPagePath
 	slog.Info("navigating to KRS page", "url", krsPageURL)
 
-	if err := session.Navigate(krsPageURL); err != nil {
-		return nil, fmt.Errorf("navigate to KRS page: %w", err)
+	if fresh, navErr := s.navigateWithLMSRetry(session, krsPageURL, req.NPM, req.Password); navErr != nil {
+		return nil, fmt.Errorf("navigate to KRS page: %w", navErr)
+	} else if fresh != session {
+		session = fresh
 	}
 
 	// Extract semester number from the page.
@@ -303,14 +330,16 @@ func (s *lmsDocumentService) GetKHSSemesters(req entity.KHSSemestersRequest) (*e
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
-	// Navigate to KHS list page.
+	// Navigate to KHS list page — retry once if LMS expired.
 	khsListURL := s.cfg.App.LMSBaseURL + port.KHSListPath
 	slog.Info("fetching KHS semesters", "url", khsListURL)
 
-	if err := session.Navigate(khsListURL); err != nil {
-		return nil, fmt.Errorf("navigate to KHS list: %w", err)
+	if fresh, navErr := s.navigateWithLMSRetry(session, khsListURL, req.NPM, req.Password); navErr != nil {
+		return nil, fmt.Errorf("navigate to KHS list: %w", navErr)
+	} else if fresh != session {
+		session = fresh
 	}
 
 	// Parse HTML to extract semesters via JavaScript.
@@ -381,17 +410,19 @@ func (s *lmsDocumentService) DownloadKHS(req entity.KHSDownloadRequest) (*entity
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
-	// Build detail URL with proper QueryEscape (slash in tahunAjaran → %2F).
+	// Build detail URL — retry once if LMS expired (backend 24h vs LMS menit).
 	q := url.Values{}
 	q.Set("tahun_ajaran", req.TahunAjaran)
 	q.Set("semester", req.Semester)
 	detailURL := s.cfg.App.LMSBaseURL + port.KHSDetailPath + "&" + q.Encode()
 	slog.Info("navigating to KHS detail", "url", detailURL)
 
-	if err := session.Navigate(detailURL); err != nil {
-		return nil, fmt.Errorf("navigate to KHS detail: %w", err)
+	if fresh, navErr := s.navigateWithLMSRetry(session, detailURL, req.NPM, req.Password); navErr != nil {
+		return nil, fmt.Errorf("navigate to KHS detail: %w", navErr)
+	} else if fresh != session {
+		session = fresh
 	}
 
 	// Find the CETAK KHS button to get the PDF URL.
@@ -473,7 +504,7 @@ func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (str
 	if err != nil {
 		return "", 0, fmt.Errorf("get session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	q := url.Values{}
 	q.Set("tahun_ajaran", req.TahunAjaran)
@@ -481,8 +512,10 @@ func (s *lmsDocumentService) DownloadKHSFile(req entity.KHSDownloadRequest) (str
 	detailURL := s.cfg.App.LMSBaseURL + port.KHSDetailPath + "&" + q.Encode()
 	slog.Info("navigating to KHS detail (fallback)", "url", detailURL)
 
-	if err := session.Navigate(detailURL); err != nil {
-		return "", 0, fmt.Errorf("navigate to KHS detail: %w", err)
+	if fresh, navErr := s.navigateWithLMSRetry(session, detailURL, req.NPM, req.Password); navErr != nil {
+		return "", 0, fmt.Errorf("navigate to KHS detail: %w", navErr)
+	} else if fresh != session {
+		session = fresh
 	}
 
 	href, err := session.ElementHref(port.SelKHSCetakBtn)
