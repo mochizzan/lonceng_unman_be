@@ -60,7 +60,7 @@ RUN addgroup -S appuser && adduser -S appuser -G appuser \
 RUN ln -sf /usr/bin/chromium-browser /usr/bin/chromium \
     && ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome
 
-# Create application directories
+# Create application directories (pure ephemeral: /data/profiles kept as empty dir for compat, not mounted)
 RUN mkdir -p /app /data/downloads /data/extracted /data/profiles /data/eval/ground_truth \
     && chown -R appuser:appuser /app /data
 
@@ -85,7 +85,7 @@ ENV APP_ENV=production \
     DOWNLOAD_DIR=/data/downloads \
     EXTRACT_DIR=/data/extracted \
     EVAL_DIR=/data/eval/ground_truth \
-    PROFILE_BASE_DIR=/data/profiles \
+    PROFILE_BASE_DIR="" \
     ROD_BROWSER=/usr/bin/chromium-browser \
     TMPDIR=/data/tmp \
     ROD_FLAGS="--no-sandbox --disable-dev-shm-usage --disable-gpu --disable-extensions --no-first-run"

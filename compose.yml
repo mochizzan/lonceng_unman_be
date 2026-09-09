@@ -51,7 +51,8 @@ services:
       DOWNLOAD_DIR: /data/downloads
       EXTRACT_DIR: /data/extracted
       EVAL_DIR: /data/eval/ground_truth
-      PROFILE_BASE_DIR: /data/profiles
+      # Pure ephemeral: no PROFILE_BASE_DIR bind-mount (in-memory TTL 15m)
+      PROFILE_BASE_DIR: ""
 
     # --- DNS Configuration ---
     # Use reliable public DNS for LMS domain resolution
@@ -65,8 +66,8 @@ services:
     volumes:
       - ./downloads:/data/downloads
       - ./extracted:/data/extracted
-      - ./profiles:/data/profiles
       - ./eval/ground_truth:/data/eval/ground_truth
+      # Pure ephemeral: no ./profiles:/data/profiles bind-mount (TTL 15m in-memory)
       # Tmpfs for /tmp — RAM-based, faster than disk, auto-cleaned on container stop
       # Used by go-rod leakless binary and Chromium temp files
       - type: tmpfs

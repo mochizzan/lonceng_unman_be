@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -61,8 +60,10 @@ func browserBinPath() string {
 }
 
 // IsTransientBrowserError reports whether err is a transient CDP/browser
-// failure worth retrying (EOF, context deadline, timeout). Non-transient
-// errors (e.g. "context canceled", invalid URL) fail immediately.
+// failure worth retrying (EOF, context deadline, timeout, closed network).
+// Non-transient errors (e.g. "context canceled", invalid URL) fail immediately.
+// Pure-ephemeral spec: must include "closed network"/"closed" to retry
+// Page() 3× [0,1s,2s] instead of bubbling 503 (reparse Singleton* bug).
 func IsTransientBrowserError(err error) bool {
 	if err == nil {
 		return false
@@ -70,7 +71,9 @@ func IsTransientBrowserError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "eof") ||
 		strings.Contains(msg, "deadline") ||
-		strings.Contains(msg, "timeout")
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "closed network") ||
+		strings.Contains(msg, "closed")
 }
 
 // parseRodFlags returns the parsed launcher flags from ROD_FLAGS env var.
@@ -168,72 +171,16 @@ func (b *Browser) Connect(headless bool) error {
 	return nil
 }
 
-// ConnectWithProfile launches Chrome with a persistent user-data-dir.
-// The profile preserves cookies, localStorage, and IndexedDB across restarts.
-// Close() will NOT call launcher.Cleanup() — the profile directory persists.
-//
-// Same flag policy as Connect() — see comment above.
-func (b *Browser) ConnectWithProfile(headless bool, profileDir string) error {
-	cleanStaleLock(profileDir)
-
-	if err := os.MkdirAll(profileDir, 0o755); err != nil {
-		return fmt.Errorf("create profile dir: %w", err)
-	}
-
-	l := launcher.New().
-		UserDataDir(profileDir).
-		Headless(headless).
-		Leakless(true).
-		Set(flags.Flag("no-sandbox")).
-		Set(flags.Flag("disable-gpu")).
-		Set(flags.Flag("disable-dev-shm-usage")).
-		Set(flags.Flag("disable-extensions")).
-		Set(flags.Flag("no-first-run")).
-		Set(flags.Flag("no-default-browser-check")).
-		Set(flags.Flag("disable-background-networking"))
-
-	if extra := parseRodFlags(); len(extra) > 0 {
-		l = launcher.New().
-			UserDataDir(profileDir).
-			Headless(headless).
-			Leakless(true)
-		for _, f := range extra {
-			l = l.Set(flags.Flag(f))
-		}
-	}
-
-	if bin := browserBinPath(); bin != "" {
-		l = l.Bin(bin)
-	}
-
-	url, err := l.Launch()
-	if err != nil {
-		return fmt.Errorf("launch browser: %w", err)
-	}
-	b.launcher = l
-	b.preserveProfile = true
-
-	r := rod.New().ControlURL(url)
-	if b.launchTimeout > 0 {
-		r = r.Timeout(b.launchTimeout)
-	}
-	if err := r.Connect(); err != nil {
-		return fmt.Errorf("connect browser: %w", err)
-	}
-	if b.launchTimeout > 0 {
-		r = r.CancelTimeout()
-	}
-	b.rod = r
-	return nil
+// ConnectWithProfile is deprecated: pure-ephemeral spec removes disk profiles.
+// It is kept for backward-compat and now simply delegates to Connect (in-memory).
+// Callers should use Connect directly. Profile directory is ignored.
+func (b *Browser) ConnectWithProfile(headless bool, _ string) error {
+	slog.Warn("ConnectWithProfile deprecated: using ephemeral Connect (profile ignored)", "headless", headless)
+	return b.Connect(headless)
 }
 
-// cleanStaleLock removes Chrome SingletonLock files left behind after a crash.
-func cleanStaleLock(profileDir string) {
-	for _, name := range []string{"SingletonLock", "SingletonSocket", "SingletonCookie"} {
-		path := filepath.Join(profileDir, name)
-		_ = os.Remove(path)
-	}
-}
+// cleanStaleLock is a no-op in ephemeral mode (no Singleton* on disk).
+func cleanStaleLock(_ string) {}
 
 // Page opens a new browser tab. Retries 3x with bounded backoff
 // ([0, 1s, 2s]) on transient CDP errors (EOF, deadline, timeout) —

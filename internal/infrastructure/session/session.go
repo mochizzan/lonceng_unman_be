@@ -24,7 +24,8 @@ const pageTimeout = 60 * time.Second
 //
 // Architecture: Each rodSession holds its own rod.Page, freshly created
 // from the shared browser. The browser maintains authentication state
-// (cookies via UserDataDir), so each new page is automatically authenticated.
+// (cookies in-memory, TTL 15m), so each new page is automatically
+// authenticated while the browser lives.
 //
 // Concurrency: The cachedSession.pageMu serializes browser.Page() calls
 // because go-rod's browser.Page() is not concurrent-safe. Each rodSession
@@ -245,7 +246,7 @@ func (s *rodSession) Navigate(url string) error {
 func navigateReadySelector(url string) string {
 	switch {
 	case strings.Contains(url, "op=data_mahasiswa&act=viewupdate"):
-		return "form" // student-profile viewupdate: mega-form 55 field
+		return "#nim" // student-profile viewupdate: NIM field is unique to valid form (not generic "form")
 	case strings.Contains(url, "op=master_mahasiswa&act=konversi_upd_mhs"):
 		return "input[name='semester']" // KRS page: SelKRSSemesterInput
 	case strings.Contains(url, "op=mahasiswa_khs&act=cetak"):
@@ -367,13 +368,18 @@ func (s *rodSession) isLMSExpiredProbe(page *rod.Page, expectedSelector string) 
 		const hasAlert = h.includes("Anda Sudah Logout") || h.includes("Sesi berakhir") || h.includes("Sudah Logout") || h.includes("session expired") || h.includes("alert-danger");
 		let hasExpected = false;
 		try { hasExpected = !!document.querySelector(sel); } catch(e) {}
-		return JSON.stringify({hasAlert, hasExpected, len: h.length});
+		const snippet = h.slice(0, 2000).replace(/\s+/g, " ");
+		return JSON.stringify({hasAlert, hasExpected, len: h.length, snippet: snippet.slice(0,1200), url: window.location.href});
 	}`, string(selJSON))
 	res, err := page.Timeout(3 * time.Second).Eval(js)
 	if err != nil {
+		slog.Debug("[DIAG-NAV] probe eval failed", "npm", s.cachedSess.npm, "selector", expectedSelector, "error", err)
 		return false
 	}
 	raw := strings.ToLower(res.Value.Str())
+	rawOrig := res.Value.Str()
+	// Diagnostic: always log probe outcome at DEBUG so next failure shows body even when false-negative.
+	slog.Debug("[DIAG-NAV] probe raw", "npm", s.cachedSess.npm, "selector", expectedSelector, "raw", rawOrig)
 	// raw is JSON-encoded string like "\"{\\\"hasAlert\\\":true,...}\""
 	if strings.Contains(raw, "hasalert") && strings.Contains(raw, "true") {
 		// Confirm missing expected element to avoid false positive on error banners inside real page.
@@ -386,6 +392,10 @@ func (s *rodSession) isLMSExpiredProbe(page *rod.Page, expectedSelector string) 
 			slog.Info("[DIAG-NAV] lms expired detected via alert-danger", "npm", s.cachedSess.npm)
 			return true
 		}
+	}
+	// Probe miss but selector absent — log at WARN so operator sees shell without known marker.
+	if strings.Contains(raw, "hasexpected") && strings.Contains(raw, "false") {
+		slog.Warn("[DIAG-NAV] probe miss but expected selector absent — possible LMS shell without known alert", "npm", s.cachedSess.npm, "selector", expectedSelector, "raw", rawOrig)
 	}
 	return false
 }

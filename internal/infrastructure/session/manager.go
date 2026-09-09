@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -32,8 +30,8 @@ const (
 
 // cachedSession holds an authenticated browser for a single NPM.
 //
-// Architecture: The browser maintains authentication state (cookies via
-// UserDataDir). Each request creates a fresh rod.Page from the browser
+// Architecture: The browser maintains authentication state (cookies in-memory,
+// TTL 15m). Each request creates a fresh rod.Page from the browser
 // via browser.Page("about:blank"). This avoids the "stale page state" bug
 // where reusing a single page across requests caused subsequent navigations
 // to fail immediately (3-10ms) after the first successful scrape.
@@ -151,15 +149,56 @@ func (m *Manager) Cleanup() {
 	m.cleanup()
 }
 
+// SetLastUsedForTest sets lastUsed for a session (testing only, pure ephemeral TTL).
+func (m *Manager) SetLastUsedForTest(npm string, t time.Time) {
+	m.mu.RLock()
+	sess, ok := m.sessions[npm]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	sess.mu.Lock()
+	sess.lastUsed = t
+	sess.mu.Unlock()
+}
+
+// SetCreatedAtForTest sets createdAt for a session (testing hard limit).
+func (m *Manager) SetCreatedAtForTest(npm string, t time.Time) {
+	m.mu.RLock()
+	sess, ok := m.sessions[npm]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	sess.mu.Lock()
+	sess.createdAt = t
+	sess.mu.Unlock()
+}
+
+// SetActiveCountForTest sets activeCount for a session (testing grace).
+func (m *Manager) SetActiveCountForTest(npm string, n int32) {
+	m.mu.RLock()
+	sess, ok := m.sessions[npm]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	sess.mu.Lock()
+	sess.activeCount = n
+	sess.mu.Unlock()
+}
+
 // getNPMLock returns a per-NPM mutex. Different NPMs can create sessions in parallel.
 func (m *Manager) getNPMLock(npm string) *sync.Mutex {
 	val, _ := m.npmLocks.LoadOrStore(npm, &sync.Mutex{})
 	return val.(*sync.Mutex)
 }
 
-// profileDir returns the Chrome profile directory path for the given NPM.
+// profileDir is deprecated in pure-ephemeral mode; kept for compat.
 func (m *Manager) profileDir(npm string) string {
-	return filepath.Join(m.cfg.App.ProfileBaseDir, npm)
+	// No disk profile — return empty to force ephemeral path.
+	_ = npm
+	return ""
 }
 
 // managerIsTimeout kept for backward-compat alias; wait* loops use isElementTimeout.
@@ -214,74 +253,12 @@ func waitDomReady(page *rod.Page) error {
 	return fmt.Errorf("wait dom ready: context deadline exceeded (readyState stayed loading for %v)", domReadyTimeout)
 }
 
-// validateSession checks whether the restored session is still authenticated
-// by navigating to the dashboard URL and checking for dashboard-specific DOM.
-func (m *Manager) validateSession(page *rod.Page) error {
-	page = page.Timeout(m.cfg.App.BrowserTimeout)
+// validateSession is deprecated in pure-ephemeral (no restore path).
+func (m *Manager) validateSession(_ *rod.Page) error { return nil }
 
-	dashboardURL := m.cfg.App.LMSDashboardURL
-	if dashboardURL == "" {
-		dashboardURL = "/admin/"
-	}
-
-	if err := page.Navigate(dashboardURL); err != nil {
-		return fmt.Errorf("navigate to dashboard: %w", err)
-	}
-	// D: wait for dashboard landmark .wrapper, not window.onload
-	if err := waitElementReady(page, browserInfra.SelSuccessIndicator); err != nil {
-		return fmt.Errorf("wait dashboard load: %w", err)
-	}
-
-	info, err := page.Info()
-	if err != nil {
-		return fmt.Errorf("get page info: %w", err)
-	}
-	if !strings.Contains(info.URL, "/admin/") {
-		return fmt.Errorf("session expired: redirected to %s", info.URL)
-	}
-
-	return nil
-}
-
-// createSessionWithRestore launches Chrome with a restored profile,
-// validates the session, and either returns it or falls back to full login.
-//
-// DNS pre-flight is performed at GetOrCreate top-level (single call). This
-// function only handles browser launch + session validation.
-func (m *Manager) createSessionWithRestore(npm, password string, profileDir string) (*cachedSession, error) {
-	br := m.browserFactory()
-	if err := br.ConnectWithProfile(m.cfg.App.BrowserHeadless, profileDir); err != nil {
-		slog.Warn("profile launch failed, falling back to full login",
-			"npm", npm, "error", err)
-		return m.createSession(npm, password)
-	}
-
-	page, err := br.Page(m.cfg.App.LMSDashboardURL)
-	if err != nil {
-		_ = br.Close()
-		return m.createSession(npm, password)
-	}
-	// D: dashboard restore → tunggu .wrapper spesifik, bukan readyState
-	if err := waitElementReady(page, browserInfra.SelSuccessIndicator); err != nil {
-		_ = br.Close()
-		return m.createSession(npm, password)
-	}
-
-	if err := m.validateSession(page); err != nil {
-		slog.Warn("restored session expired, performing full login",
-			"npm", npm, "reason", err.Error())
-		_ = br.Close()
-		return m.createSession(npm, password)
-	}
-
-	slog.Info("restored session validated successfully", "npm", npm)
-	now := time.Now()
-	return &cachedSession{
-		npm:       npm,
-		browser:   br,
-		createdAt: now,
-		lastUsed:  now,
-	}, nil
+// createSessionWithRestore is deprecated: ephemeral Connect without UserDataDir.
+func (m *Manager) createSessionWithRestore(npm, password string, _ string) (*cachedSession, error) {
+	return m.createSession(npm, password)
 }
 
 // GetOrCreate returns an existing valid session for the NPM,
@@ -407,28 +384,13 @@ func (m *Manager) createNewSession(npm, password string) (port.BrowserSession, e
 		}
 	}
 
-	// Try restore from disk before full login.
-	profileDir := m.profileDir(npm)
-
-	// Tier-2 fix: single DNS pre-flight per cold-start attempt. Previously
-	// this ran twice on the restore→fallback path (once in
-	// createSessionWithRestore, once in createSession). The OS DNS cache
-	// absorbs the second call but it's still wasted work; more importantly,
-	// we want a fail-fast at the top level so callers see a clear error
-	// instead of two timeouts chained together.
+	// Pure ephemeral: DNS pre-flight then fresh browser (no disk restore).
 	if err := m.CheckDNS(m.cfg.App.LMSBaseURL); err != nil {
 		return nil, err
 	}
 
-	var err error
-	var sess *cachedSession
-	if _, statErr := os.Stat(profileDir); statErr == nil {
-		sess, err = m.createSessionWithRestore(npm, password, profileDir)
-	} else {
-		// No profile on disk — full login.
-		slog.Info("creating new session", "npm", npm)
-		sess, err = m.createSession(npm, password)
-	}
+	slog.Info("creating new session", "npm", npm)
+	sess, err := m.createSession(npm, password)
 	if err != nil {
 		return nil, err
 	}
@@ -609,22 +571,15 @@ func (m *Manager) CheckDNS(rawURL string) error {
 // function only handles browser launch + login form submission.
 //
 // The login page is intentionally NOT closed after successful login.
-// Closing the login page before cookies are fully persisted to the
-// UserDataDir profile causes subsequent pages to lose authentication
-// and redirect to the login page. Instead, we keep the login page open
-// and create fresh pages for each request via browser.Page("about:blank").
-// The browser maintains authentication state via the shared profile, so
-// new pages are automatically authenticated once cookies are persisted.
+// The browser's in-memory cookie jar is shared across all pages, but
+// closing the login page immediately can still race with cookie
+// persistence. Keep it open; it will be closed when the browser is
+// evicted. Fresh pages are created via browser.Page("about:blank").
 func (m *Manager) createSession(npm, password string) (*cachedSession, error) {
 	br := m.browserFactory()
 
-	// Use persistent profile so cookies survive browser restarts.
-	profileDir := m.profileDir(npm)
-	if err := os.MkdirAll(profileDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create profile dir: %w", err)
-	}
-
-	if err := br.ConnectWithProfile(m.cfg.App.BrowserHeadless, profileDir); err != nil {
+	// Pure ephemeral: no UserDataDir, in-memory only (TTL 15m).
+	if err := br.Connect(m.cfg.App.BrowserHeadless); err != nil {
 		return nil, fmt.Errorf("browser connect: %w", err)
 	}
 
@@ -800,8 +755,9 @@ func (m *Manager) cleanup() {
 	m.mu.Lock()
 	now := time.Now()
 	type evictionTarget struct {
-		npm  string
-		sess *cachedSession
+		npm    string
+		sess   *cachedSession
+		isHard bool
 	}
 	var toEvict []evictionTarget
 	for npm, sess := range m.sessions {
@@ -818,7 +774,7 @@ func (m *Manager) cleanup() {
 					"npm", npm,
 					"age", now.Sub(createdAt).Round(time.Second))
 			}
-			toEvict = append(toEvict, evictionTarget{npm, sess})
+			toEvict = append(toEvict, evictionTarget{npm, sess, true})
 			continue
 		}
 
@@ -830,7 +786,7 @@ func (m *Manager) cleanup() {
 					"inactive_duration", now.Sub(lastUsed).Round(time.Second))
 				continue
 			}
-			toEvict = append(toEvict, evictionTarget{npm, sess})
+			toEvict = append(toEvict, evictionTarget{npm, sess, false})
 		}
 	}
 
@@ -844,10 +800,16 @@ func (m *Manager) cleanup() {
 
 	// Close browsers outside m.mu critical section.
 	for _, t := range toEvict {
-		// Double-check: pastikan masih expired dan tidak aktif
 		t.sess.mu.Lock()
-		if t.sess.activeCount > 0 || time.Since(t.sess.lastUsed) < m.ttl {
+		if !t.isHard && (t.sess.activeCount > 0 || time.Since(t.sess.lastUsed) < m.ttl) {
+			// Revived before eviction (soft TTL only) — re-insert.
 			t.sess.mu.Unlock()
+			m.mu.Lock()
+			// Re-insert only if not already replaced by a new session for same NPM.
+			if _, exists := m.sessions[t.npm]; !exists {
+				m.sessions[t.npm] = t.sess
+			}
+			m.mu.Unlock()
 			slog.Info("session revived before eviction, skipping", "npm", t.npm)
 			continue
 		}

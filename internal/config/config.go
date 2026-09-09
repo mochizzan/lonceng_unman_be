@@ -101,11 +101,10 @@ func New() (*Config, error) {
 			DownloadDir: getEnv("DOWNLOAD_DIR", "./downloads"),
 			ExtractDir:  getEnv("EXTRACT_DIR", "./extracted"),
 			EvalDir:     getEnv("EVAL_DIR", "./eval/ground_truth"),
-			// SESSION_TTL default raised from 15m → 24h: amortizes the cold-start
-			// cost across an entire academic day. Combined with the 2h hard
-			// lifetime cap (manager.go:26-30), sessions that survive past 2h
-			// are force-evicted anyway, so 24h is effectively a soft ceiling.
-			SessionTTL:        getEnvDuration("SESSION_TTL", 24*time.Hour),
+			// SESSION_TTL pure-ephemeral default 15m (spec 2026-09-09):
+			// soft TTL 15m + hard 2h+5m grace (manager.go). Login cost 6-9s
+			// cheaper than 64s hang / 503 from stale Singleton* reparse.
+			SessionTTL:        getEnvDuration("SESSION_TTL", 15*time.Minute),
 			MaxSessions:       getEnvInt("MAX_SESSIONS", 20),
 			ProfileBaseDir:    getEnv("PROFILE_BASE_DIR", "./profiles"),
 			MaxBodySize:       parseByteSize(getEnv("MAX_BODY_SIZE", "1MB")),
@@ -163,11 +162,14 @@ func New() (*Config, error) {
 	}
 	cfg.App.EvalDir = absEval
 
-	absProfile, err := filepath.Abs(cfg.App.ProfileBaseDir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve profile_base_dir: %w", err)
+	// Pure ephemeral: ProfileBaseDir may be "" (no disk profile). Skip Abs in that case.
+	if strings.TrimSpace(cfg.App.ProfileBaseDir) != "" {
+		absProfile, err := filepath.Abs(cfg.App.ProfileBaseDir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve profile_base_dir: %w", err)
+		}
+		cfg.App.ProfileBaseDir = absProfile
 	}
-	cfg.App.ProfileBaseDir = absProfile
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
@@ -243,9 +245,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("browser_launch_timeout must be > 0; got %v", c.App.BrowserLaunchTimeout)
 	}
 
-	if strings.TrimSpace(c.App.ProfileBaseDir) == "" {
-		return fmt.Errorf("profile_base_dir must not be empty")
-	}
+	// Pure ephemeral: empty ProfileBaseDir is allowed (in-memory only, TTL 15m).
+	// No validation error when empty — browser.Connect is used without UserDataDir.
 
 	if c.App.Env == "production" && c.CORS.AllowOrigins == "*" {
 		return fmt.Errorf("cors_allow_origins must not be '*' in production")

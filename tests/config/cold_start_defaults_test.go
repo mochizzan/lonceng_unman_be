@@ -36,9 +36,9 @@ func TestColdStart_Defaults_ApplyWhenEnvUnset(t *testing.T) {
 		t.Errorf("DNS_TIMEOUT default = %v, want 5s", cfg.App.DNSTimeout)
 	}
 
-	// Tier-2 (user override): SESSION_TTL raised 15m → 24h.
-	if cfg.App.SessionTTL != 24*time.Hour {
-		t.Errorf("SESSION_TTL default = %v, want 24h", cfg.App.SessionTTL)
+	// Pure ephemeral spec 2026-09-09: SESSION_TTL default 15m (was 24h).
+	if cfg.App.SessionTTL != 15*time.Minute {
+		t.Errorf("SESSION_TTL default = %v, want 15m", cfg.App.SessionTTL)
 	}
 
 	// Tier-1: MAX_SESSIONS 15 → 20.
