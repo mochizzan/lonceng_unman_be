@@ -15,6 +15,11 @@ var (
 	ErrExtractionNotFound = errors.New("extraction not found")
 	// ErrPhotoNotFound indicates no photo was found on the dashboard.
 	ErrPhotoNotFound = errors.New("student photo not found")
+	// ErrAlumniKRS indicates the student is already ALUMNI — KRS is no longer
+	// available. The sentinel is returned by ExtractionService when a
+	// semester_ALUMNI_*.pdf exists in downloads/{npm}/krs/. Handlers map it
+	// to 409 Conflict with a user-facing message to use KHS instead.
+	ErrAlumniKRS = errors.New("mahasiswa status ALUMNI — KRS tidak tersedia")
 )
 
 // AppError is a structured error that separates public messages (safe to send

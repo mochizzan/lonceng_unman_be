@@ -139,8 +139,44 @@ func (s *extractionService) ExtractKHS(npm string, password string, tahunAjaran 
 	return nil, fmt.Errorf("find khs file: %w", err)
 }
 
+// hasAlumniKRS reports whether an ALUMNI KRS PDF exists for the NPM.
+// It scans downloads/{npm}/krs/ for any file whose name contains "ALUMNI"
+// (case-insensitive), e.g. semester_ALUMNI_2026.pdf. This is a pure
+// filesystem check — no browser/Rod interaction — so it matches the spec
+// "pengecekan saat sudah terdownload saja, di endpoint GET".
+func (s *extractionService) hasAlumniKRS(npm string) bool {
+	krsDownloadDir := filepath.Join(s.downloadDir, npm, entity.DocTypeKRS.String())
+	entries, err := os.ReadDir(krsDownloadDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.EqualFold(filepath.Ext(e.Name()), entity.ExtPDF) {
+			continue
+		}
+		upper := strings.ToUpper(e.Name())
+		if strings.Contains(upper, "ALUMNI") && !strings.HasSuffix(upper, ".META.JSON") {
+			return true
+		}
+	}
+	return false
+}
+
 // GetKRSExtraction retrieves cached KRS extraction.
+// If an ALUMNI KRS PDF exists in downloads/{npm}/krs/ (e.g.
+// semester_ALUMNI_2026.pdf), the student is already graduated and KRS is
+// no longer applicable. In that case this returns ErrAlumniKRS so the
+// handler can respond with 409 Conflict ("gunakan KHS"). The check is
+// filesystem-only — no LMS/browser call.
 func (s *extractionService) GetKRSExtraction(npm string) ([]byte, error) {
+	// ALUMNI gate — check downloads before serving extracted JSON.
+	if s.hasAlumniKRS(npm) {
+		return nil, fmt.Errorf("krs unavailable for npm %s: %w", npm, apperror.ErrAlumniKRS)
+	}
+
 	// Find the latest KRS JSON file
 	krsDir := filepath.Join(s.extractDir, npm, entity.DocTypeKRS.String())
 	entries, err := os.ReadDir(krsDir)

@@ -145,6 +145,9 @@ func (h *ExtractionHandler) GetKRS(c fiber.Ctx) error {
 
 	data, err := h.extractionSvc.GetKRSExtraction(req.NPM)
 	if err != nil {
+		if errors.Is(err, apperror.ErrAlumniKRS) {
+			return apperror.Conflict("Mahasiswa status ALUMNI — KRS tidak tersedia, gunakan KHS")
+		}
 		if errors.Is(err, apperror.ErrExtractionNotFound) || errors.Is(err, os.ErrNotExist) {
 			return apperror.NotFound("KRS extraction not found for npm: "+req.NPM, err)
 		}
