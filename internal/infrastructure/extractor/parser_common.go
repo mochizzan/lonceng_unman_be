@@ -3,6 +3,7 @@ package extractor
 import (
 	"strings"
 	"time"
+	_ "time/tzdata"
 
 	"lonceng_unman_be/internal/domain/entity"
 )
@@ -199,8 +200,15 @@ func parsePenerbitanFromLines(lines []string) PenerbitanInfo {
 		// Try to parse the date, then add WIB timezone
 		for _, format := range dateFormats {
 			if t, err := time.Parse(format, dateStr); err == nil {
-				// Add WIB offset (+07:00) since the date has no timezone info
-				wib, _ := time.LoadLocation("Asia/Jakarta")
+				// Add WIB offset (+07:00) since the date has no timezone info.
+				// LoadLocation can return (nil, err) on Windows when zoneinfo
+				// is missing — t.In(nil) would panic ("missing Location").
+				// Fix: embed tzdata (import _ "time/tzdata" above) + fallback
+				// to FixedZone so extract never 500s on any Windows host.
+				wib, err := time.LoadLocation("Asia/Jakarta")
+				if err != nil || wib == nil {
+					wib = time.FixedZone("WIB", 7*3600)
+				}
 				t = t.In(wib)
 				return PenerbitanInfo{
 					Tempat:  tempat,
