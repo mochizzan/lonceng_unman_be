@@ -472,6 +472,8 @@ func (s *EvalService) studentInfoWithStore(st port.EvalStore, npm string) (name,
 }
 
 // evaluateDocWithStore evaluates a single document pair using the provided store.
+// FIX 2026-09-10: course-level was bug (TP konstan 8, FN/FP per-matkul +6/+8).
+// Now field-level: each course field contributes TP/FN/FP individually via CompareFields.
 func (s *EvalService) evaluateDocWithStore(st port.EvalStore, npm, docType, filename string) (entity.Metrics, error) {
 	gtData, err := st.LoadGT(npm, docType, filename)
 	if err != nil {
@@ -500,14 +502,48 @@ func (s *EvalService) evaluateDocWithStore(st port.EvalStore, npm, docType, file
 		fp += p
 		tn += tn0
 
-		courseResults := MatchKHSCourses(gt.KHS.MataKuliah, extract.KHS.MataKuliah)
-		for _, cr := range courseResults {
-			if !cr.Matched {
-				if cr.IsGTOnly {
-					fn += 6
-				} else {
-					fp += 6
-				}
+		// Field-level KHS courses: 6 fields per course (kode,nama,dosen,sks,nilai,mutu)
+		predMap := make(map[int]entity.KHSMataKuliah, len(extract.KHS.MataKuliah))
+		for _, c := range extract.KHS.MataKuliah {
+			predMap[c.No] = c
+		}
+		gtNos := make(map[int]bool, len(gt.KHS.MataKuliah))
+		for _, gtMK := range gt.KHS.MataKuliah {
+			gtNos[gtMK.No] = true
+			predMK, exists := predMap[gtMK.No]
+			if !exists {
+				// whole course missing in pred -> 6 fields FN
+				fn += 6
+				continue
+			}
+			// 6 field comparisons per matched course
+			fields := []struct {
+				name    string
+				gtVal   string
+				predVal string
+				isKode  bool
+				isInt   bool
+			}{
+				{"kode", gtMK.Kode, predMK.Kode, true, false},
+				{"nama", gtMK.Nama, predMK.Nama, false, false},
+				{"dosen", gtMK.Dosen, predMK.Dosen, false, false},
+				{"sks", strconv.Itoa(gtMK.SKS), strconv.Itoa(predMK.SKS), false, true},
+				{"nilai", gtMK.Nilai, predMK.Nilai, false, false},
+				{"mutu", strconv.Itoa(gtMK.Mutu), strconv.Itoa(predMK.Mutu), false, true},
+			}
+			for _, f := range fields {
+				result := CompareFields(f.gtVal, f.predVal, f.isKode, f.isInt, false, false)
+				t2, f2, p2, tn2 := countResult(result.Status)
+				tp += t2
+				fn += f2
+				fp += p2
+				tn += tn2
+			}
+		}
+		// extra courses in pred only -> 6 fields FP each
+		for _, predMK := range extract.KHS.MataKuliah {
+			if !gtNos[predMK.No] {
+				fp += 6
 			}
 		}
 	} else {
@@ -525,14 +561,44 @@ func (s *EvalService) evaluateDocWithStore(st port.EvalStore, npm, docType, file
 		fp += p
 		tn += tn0
 
-		courseResults := MatchCourses(gt.KRS.MataKuliah, extract.KRS.MataKuliah)
-		for _, cr := range courseResults {
-			if !cr.Matched {
-				if cr.IsGTOnly {
-					fn += 8
-				} else {
-					fp += 8
-				}
+		// Field-level KRS courses: 8 fields per course (kode,nama,dosen,sks,kelas,jadwal.hari,waktu_mulai,waktu_selesai)
+		predMap := make(map[int]entity.KRSMataKuliah, len(extract.KRS.MataKuliah))
+		for _, c := range extract.KRS.MataKuliah {
+			predMap[c.No] = c
+		}
+		gtNos := make(map[int]bool, len(gt.KRS.MataKuliah))
+		for _, gtMK := range gt.KRS.MataKuliah {
+			gtNos[gtMK.No] = true
+			predMK, exists := predMap[gtMK.No]
+			if !exists {
+				fn += 8
+				continue
+			}
+			fields := []struct {
+				gtVal, predVal        string
+				isKode, isInt, isTime bool
+			}{
+				{gtMK.Kode, predMK.Kode, true, false, false},
+				{gtMK.Nama, predMK.Nama, false, false, false},
+				{gtMK.Dosen, predMK.Dosen, false, false, false},
+				{strconv.Itoa(gtMK.SKS), strconv.Itoa(predMK.SKS), false, true, false},
+				{gtMK.Kelas, predMK.Kelas, false, false, false},
+				{gtMK.Jadwal.Hari, predMK.Jadwal.Hari, false, false, false},
+				{gtMK.Jadwal.WaktuMulai, predMK.Jadwal.WaktuMulai, false, false, true},
+				{gtMK.Jadwal.WaktuSelesai, predMK.Jadwal.WaktuSelesai, false, false, true},
+			}
+			for _, f := range fields {
+				result := CompareFields(f.gtVal, f.predVal, f.isKode, f.isInt, false, f.isTime)
+				t2, f2, p2, tn2 := countResult(result.Status)
+				tp += t2
+				fn += f2
+				fp += p2
+				tn += tn2
+			}
+		}
+		for _, predMK := range extract.KRS.MataKuliah {
+			if !gtNos[predMK.No] {
+				fp += 8
 			}
 		}
 	}
